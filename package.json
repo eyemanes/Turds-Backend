@@ -1,22 +1,9 @@
 {
   "name": "turds-nation-backend",
   "version": "1.0.0",
-  "description": "TURDS Nation Backend API - Vercel Serverless Functions",
-  "main": "api/health.js",
+  "description": "TURDS Nation Backend API",
   "type": "module",
-  "scripts": {
-    "dev": "vercel dev",
-    "build": "echo 'Serverless functions ready for deployment'",
-    "deploy": "vercel --prod",
-    "test": "node api/health.js"
-  },
-  "dependencies": {
-    "@vercel/node": "^3.0.21"
-  },
-  "devDependencies": {
-    "vercel": "^32.7.2"
-  },
   "engines": {
-    "node": "20.x"
+    "node": "20"
   }
 }
