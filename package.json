@@ -2,30 +2,21 @@
   "name": "turds-nation-backend",
   "version": "1.0.0",
   "description": "TURDS Nation Backend API - Vercel Serverless Functions",
-  "main": "index.js",
+  "main": "api/health.js",
   "type": "module",
   "scripts": {
     "dev": "vercel dev",
-    "build": "echo 'Build complete - Serverless functions ready'",
+    "build": "echo 'Serverless functions ready for deployment'",
     "deploy": "vercel --prod",
-    "test": "echo 'Tests not implemented yet'",
-    "lint": "eslint api/",
-    "start": "vercel dev"
+    "test": "node api/health.js"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.87.6",
-    "@vercel/node": "^3.0.21",
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "firebase-admin": "^12.0.0",
-    "jsonwebtoken": "^9.0.2",
-    "node-fetch": "^3.3.2"
+    "@vercel/node": "^3.0.21"
   },
   "devDependencies": {
-    "vercel": "^32.7.2",
-    "eslint": "^8.55.0"
+    "vercel": "^32.7.2"
   },
   "engines": {
-    "node": "22.x"
+    "node": "20.x"
   }
 }

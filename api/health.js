@@ -1,6 +1,6 @@
-// Health check endpoint with Solana connection test
+// Health check endpoint - Vercel Serverless Function
 export default async function handler(req, res) {
-  // Enable CORS
+  // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -12,55 +12,28 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Get Solana RPC URL from environment variables
-    const solanaRpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-    
-    let solanaStatus = 'not_configured';
-    
-    // Test Solana connection if URL is provided
-    if (solanaRpcUrl && solanaRpcUrl !== 'https://api.mainnet-beta.solana.com') {
-      try {
-        // Simple fetch test to Solana RPC
-        const solanaResponse = await fetch(solanaRpcUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'getHealth'
-          })
-        });
-        
-        if (solanaResponse.ok) {
-          solanaStatus = 'connected';
-        } else {
-          solanaStatus = 'error';
-        }
-      } catch (error) {
-        solanaStatus = 'error';
-      }
-    } else {
-      solanaStatus = 'using_default';
-    }
-
     const response = {
       message: 'TURDS Nation API is live! 🏛️',
       timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV || 'development',
+      environment: process.env.NODE_ENV || 'production',
       version: '1.0.0',
       status: 'operational',
-      solana: {
-        rpc_url: solanaRpcUrl ? 'configured' : 'not_configured',
-        status: solanaStatus,
-        network: 'mainnet-beta'
-      },
+      runtime: 'nodejs20.x',
+      platform: 'vercel-serverless',
       endpoints: {
         health: '/api/health',
-        admin: '/api/admin/*',
-        auth: '/api/auth/*',
-        voting: '/api/voting/*',
-        government: '/api/government/*',
-        elections: '/api/elections/*'
+        admin: {
+          login: '/api/admin/login',
+          announcements: '/api/admin/announcements'
+        }
+      },
+      config: {
+        cors_enabled: true,
+        rate_limiting: 'enabled',
+        environment_variables: {
+          node_env: process.env.NODE_ENV ? 'set' : 'not_set',
+          solana_rpc: process.env.SOLANA_RPC_URL ? 'configured' : 'using_default'
+        }
       }
     };
 
@@ -70,7 +43,8 @@ export default async function handler(req, res) {
     res.status(500).json({ 
       error: 'Internal server error', 
       message: error.message,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      status: 'error'
     });
   }
 }
