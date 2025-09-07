@@ -18,7 +18,7 @@ export default async function handler(req, res) {
       environment: process.env.NODE_ENV || 'production',
       version: '1.0.0',
       status: 'operational',
-      runtime: 'nodejs20.x',
+      runtime: 'nodejs18.x',
       platform: 'vercel-serverless',
       endpoints: {
         health: '/api/health',

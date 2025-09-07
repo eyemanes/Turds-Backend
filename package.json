@@ -4,6 +4,20 @@
   "description": "TURDS Nation Backend API",
   "type": "module",
   "engines": {
-    "node": "20"
+    "node": "18.x"
+  },
+  "scripts": {
+    "build": "echo 'No build needed for Vercel Functions'",
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.87.6",
+    "@vercel/node": "^3.0.0",
+    "firebase-admin": "^11.11.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3",
+    "vercel": "^32.0.0"
   }
 }

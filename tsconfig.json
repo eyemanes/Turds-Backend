@@ -2,21 +2,18 @@
   "compilerOptions": {
     "target": "ES2020",
     "lib": ["ES2020"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
+    "allowJs": true,
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true
+    "allowSyntheticDefaultImports": true,
+    "noEmit": true,
+    "isolatedModules": true
   },
   "include": ["api/**/*", "lib/**/*"],
-  "exclude": ["node_modules", ".vercel"]
+  "exclude": ["node_modules", ".vercel", "dist"]
 }
