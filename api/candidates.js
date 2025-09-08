@@ -70,6 +70,24 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const candidateData = req.body;
       
+      // Check if user meets follower requirement
+      if (candidateData.userId) {
+        const userDoc = await firestore.collection('users').doc(candidateData.userId).get();
+        
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          
+          // Check follower requirement (min 1000)
+          if (userData.twitterFollowers < 1000) {
+            return res.status(403).json({ 
+              error: 'Minimum 1000 Twitter followers required to run for office',
+              currentFollowers: userData.twitterFollowers || 0,
+              required: 1000
+            });
+          }
+        }
+      }
+      
       const docData = {
         ...candidateData,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),

@@ -1,6 +1,7 @@
 import admin from 'firebase-admin';
+import fetch from 'node-fetch';
 
-// Initialize Firebase Admin only once
+// Initialize Firebase Admin
 let db = null;
 
 function initializeFirebase() {
@@ -32,6 +33,47 @@ function initializeFirebase() {
   }
 }
 
+// Fetch Twitter data from RapidAPI
+async function fetchTwitterData(username) {
+  try {
+    const cleanUsername = username.replace('@', '');
+    
+    const response = await fetch(`https://twitter241.p.rapidapi.com/user?username=${cleanUsername}`, {
+      method: 'GET',
+      headers: {
+        'x-rapidapi-key': process.env.RAPIDAPI_KEY || '20fd5100f3msh8ad5102149a060ep18b8adjsn04eed04ad53d',
+        'x-rapidapi-host': 'twitter241.p.rapidapi.com'
+      }
+    });
+
+    if (!response.ok) {
+      console.error('Twitter API error:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    // Extract follower data from the response
+    // The API response structure may vary, adjust as needed
+    if (data && data.result && data.result.data && data.result.data.user) {
+      const userData = data.result.data.user.result;
+      return {
+        followers: userData.legacy?.followers_count || 0,
+        following: userData.legacy?.friends_count || 0,
+        tweets: userData.legacy?.statuses_count || 0,
+        verified: userData.legacy?.verified || false,
+        profileImageUrl: userData.legacy?.profile_image_url_https?.replace('_normal', '_400x400'),
+        description: userData.legacy?.description || ''
+      };
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error fetching Twitter data:', error);
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -48,7 +90,6 @@ export default async function handler(req, res) {
     const firestore = initializeFirebase();
     
     if (!firestore) {
-      // Return success even without database for now
       return res.status(200).json({
         success: true,
         message: 'User operation completed (database not configured)',
@@ -64,18 +105,35 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'User ID is required' });
       }
       
+      // Fetch Twitter data if username provided
+      let twitterData = null;
+      if (username) {
+        console.log('Fetching Twitter data for:', username);
+        twitterData = await fetchTwitterData(username);
+        console.log('Twitter data received:', twitterData);
+      }
+      
       const userData = {
         uid,
         username: username || 'Anonymous',
         email: email || null,
-        profilePicture: profilePicture || null,
+        profilePicture: profilePicture || twitterData?.profileImageUrl || null,
         walletAddress: walletAddress || null,
         registeredAt: admin.firestore.FieldValue.serverTimestamp(),
         lastActive: admin.firestore.FieldValue.serverTimestamp(),
         isActive: true,
         role: 'citizen',
         tokenBalance: 0,
-        verifiedHolder: false
+        verifiedHolder: false,
+        // Add Twitter metrics
+        twitterFollowers: twitterData?.followers || 0,
+        twitterFollowing: twitterData?.following || 0,
+        twitterTweets: twitterData?.tweets || 0,
+        twitterVerified: twitterData?.verified || false,
+        twitterBio: twitterData?.description || '',
+        twitterDataFetchedAt: admin.firestore.FieldValue.serverTimestamp(),
+        // Check if eligible to be candidate (min 1000 followers)
+        eligibleForCandidacy: (twitterData?.followers || 0) >= 1000
       };
 
       // Save to users collection
@@ -90,13 +148,17 @@ export default async function handler(req, res) {
       return res.status(200).json({ 
         success: true, 
         user: userData,
-        message: 'User registered successfully'
+        message: 'User registered successfully',
+        twitterData: {
+          followers: userData.twitterFollowers,
+          eligible: userData.eligibleForCandidacy
+        }
       });
     }
 
     // Get user profile
     if (req.method === 'GET') {
-      const { uid } = req.query;
+      const { uid, refreshTwitter } = req.query;
       
       if (!uid) {
         return res.status(400).json({ error: 'User ID required' });
@@ -108,9 +170,30 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: 'User not found' });
       }
       
+      const userData = userDoc.data();
+      
+      // Optionally refresh Twitter data
+      if (refreshTwitter === 'true' && userData.username) {
+        const twitterData = await fetchTwitterData(userData.username);
+        if (twitterData) {
+          const updates = {
+            twitterFollowers: twitterData.followers,
+            twitterFollowing: twitterData.following,
+            twitterTweets: twitterData.tweets,
+            twitterVerified: twitterData.verified,
+            twitterBio: twitterData.description,
+            twitterDataFetchedAt: admin.firestore.FieldValue.serverTimestamp(),
+            eligibleForCandidacy: twitterData.followers >= 1000
+          };
+          
+          await firestore.collection('users').doc(uid).update(updates);
+          Object.assign(userData, updates);
+        }
+      }
+      
       return res.status(200).json({ 
         success: true, 
-        user: { id: userDoc.id, ...userDoc.data() }
+        user: { id: userDoc.id, ...userData }
       });
     }
 
