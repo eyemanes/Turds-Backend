@@ -36,7 +36,7 @@ export default async function handler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -111,6 +111,41 @@ export default async function handler(req, res) {
         success: true, 
         candidates,
         total: candidates.length
+      });
+    }
+
+    // Delete candidate
+    if (req.method === 'DELETE') {
+      const { id } = req.query;
+      const { userId } = req.body;
+      
+      if (!id) {
+        return res.status(400).json({ error: 'Candidate ID required' });
+      }
+      
+      // Get candidate to verify ownership
+      const candidateDoc = await firestore.collection('candidates').doc(id).get();
+      
+      if (!candidateDoc.exists) {
+        return res.status(404).json({ error: 'Candidate not found' });
+      }
+      
+      const candidateData = candidateDoc.data();
+      
+      // Verify ownership
+      if (candidateData.userId !== userId) {
+        return res.status(403).json({ error: 'Not authorized to delete this profile' });
+      }
+      
+      // Mark as inactive instead of deleting
+      await firestore.collection('candidates').doc(id).update({
+        isActive: false,
+        deletedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      return res.status(200).json({ 
+        success: true, 
+        message: 'Candidate profile deleted successfully'
       });
     }
 
