@@ -24,8 +24,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         isActive: true,
         supportersCount: 0,
         endorsements: [],
-        verifiedHolder: false, // TODO: Verify with blockchain
-        tokenBalance: 0 // TODO: Fetch from blockchain
+        verifiedHolder: false,
+        tokenBalance: 0
       };
 
       // Save to Firestore using admin SDK (bypasses security rules)
