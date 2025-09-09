@@ -276,10 +276,22 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'User ID required' });
       }
       
+      // Add last active timestamp
       updates.lastActive = admin.firestore.FieldValue.serverTimestamp();
       
+      // If updating wallet address, also update wallet type
+      if ('walletAddress' in updates) {
+        console.log('Updating wallet address:', updates.walletAddress);
+      }
+      
       await firestore.collection('users').doc(uid).update(updates);
-      await firestore.collection('citizens').doc(uid).update(updates);
+      
+      // Also update citizens collection if it exists
+      const citizenDoc = await firestore.collection('citizens').where('uid', '==', uid).get();
+      if (!citizenDoc.empty) {
+        const citizenId = citizenDoc.docs[0].id;
+        await firestore.collection('citizens').doc(citizenId).update(updates);
+      }
       
       return res.status(200).json({ 
         success: true, 
