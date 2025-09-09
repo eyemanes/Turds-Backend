@@ -211,15 +211,43 @@ export default async function handler(req, res) {
       const existingUser = await firestore.collection('users').doc(uid).get();
       
       if (existingUser.exists) {
-        // User exists, just update last active
-        await firestore.collection('users').doc(uid).update({
+        // User exists, update Twitter data if username provided
+        let updateData = {
           lastActive: admin.firestore.FieldValue.serverTimestamp()
-        });
+        };
         
+        // Fetch fresh Twitter data if username provided
+        if (username) {
+          console.log('Refreshing Twitter data for existing user:', username);
+          const twitterData = await fetchTwitterData(username);
+          if (twitterData) {
+            updateData = {
+              ...updateData,
+              twitterFollowers: twitterData.followers,
+              twitterFollowing: twitterData.following,
+              twitterTweets: twitterData.tweets,
+              twitterVerified: twitterData.verified,
+              twitterBio: twitterData.description,
+              twitterAccountCreatedAt: twitterData.accountCreatedAt,
+              twitterAccountAgeMonths: twitterData.accountAgeMonths,
+              eligibleToVote: twitterData.eligibleToVote,
+              eligibleForCandidacy: twitterData.followers >= 500,
+              twitterDataFetchedAt: admin.firestore.FieldValue.serverTimestamp()
+            };
+            console.log('Updated Twitter data:', {
+              followers: twitterData.followers,
+              eligible: twitterData.followers >= 500
+            });
+          }
+        }
+        
+        await firestore.collection('users').doc(uid).update(updateData);
+        
+        const updatedUser = await firestore.collection('users').doc(uid).get();
         return res.status(200).json({ 
           success: true, 
-          user: existingUser.data(),
-          message: 'User already registered'
+          user: updatedUser.data(),
+          message: 'User data refreshed'
         });
       }
       

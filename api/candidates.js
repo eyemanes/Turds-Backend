@@ -76,15 +76,27 @@ export default async function handler(req, res) {
         
         if (userDoc.exists) {
           const userData = userDoc.data();
+          console.log('User data for candidate check:', {
+            userId: candidateData.userId,
+            followers: userData.twitterFollowers,
+            eligible: userData.eligibleForCandidacy
+          });
           
           // Check follower requirement (min 500)
-          if (userData.twitterFollowers < 500) {
+          if (!userData.twitterFollowers || userData.twitterFollowers < 500) {
+            console.log('Follower requirement not met:', userData.twitterFollowers);
             return res.status(403).json({ 
               error: 'Minimum 500 Twitter followers required to run for office',
               currentFollowers: userData.twitterFollowers || 0,
               required: 500
             });
           }
+        } else {
+          console.log('User not found in database:', candidateData.userId);
+          return res.status(403).json({ 
+            error: 'User not found. Please refresh your profile.',
+            userId: candidateData.userId
+          });
         }
       }
       
