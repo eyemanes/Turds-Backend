@@ -37,6 +37,7 @@ function initializeFirebase() {
 async function fetchTwitterData(username) {
   try {
     const cleanUsername = username.replace('@', '');
+    console.log('Fetching Twitter data for username:', cleanUsername);
     
     const response = await fetch(`https://twitter241.p.rapidapi.com/user?username=${cleanUsername}`, {
       method: 'GET',
@@ -52,41 +53,80 @@ async function fetchTwitterData(username) {
     }
 
     const data = await response.json();
+    console.log('Twitter API response:', data);
     
-    // Extract follower data from the response
-    if (data && data.result && data.result.data && data.result.data.user) {
+    // Extract data from the API response structure
+    if (data && data.result && data.result.data && data.result.data.user && data.result.data.user.result) {
       const userData = data.result.data.user.result;
       const legacy = userData.legacy || {};
       
-      // Parse account creation date
-      let accountAge = null;
+      console.log('Legacy data:', legacy);
+      
+      // Parse account creation date properly
+      let accountAgeMonths = 0;
       let accountCreatedAt = null;
+      
       if (legacy.created_at) {
+        // Twitter date format: "Wed Oct 10 20:19:24 +0000 2007"
         accountCreatedAt = new Date(legacy.created_at);
         const now = new Date();
-        const ageInMonths = (now.getFullYear() - accountCreatedAt.getFullYear()) * 12 + 
-                           (now.getMonth() - accountCreatedAt.getMonth());
-        accountAge = ageInMonths;
+        const diffTime = Math.abs(now - accountCreatedAt);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        accountAgeMonths = Math.floor(diffDays / 30);
+        
+        console.log('Account created:', accountCreatedAt);
+        console.log('Account age in months:', accountAgeMonths);
       }
       
-      return {
+      const result = {
         followers: legacy.followers_count || 0,
         following: legacy.friends_count || 0,
         tweets: legacy.statuses_count || 0,
         verified: legacy.verified || false,
-        profileImageUrl: legacy.profile_image_url_https?.replace('_normal', '_400x400'),
+        profileImageUrl: legacy.profile_image_url_https?.replace('_normal', '_400x400') || null,
         description: legacy.description || '',
         accountCreatedAt: accountCreatedAt ? accountCreatedAt.toISOString() : null,
-        accountAgeMonths: accountAge || 0,
-        eligibleToVote: accountAge >= 6 // Account must be 6+ months old to vote
+        accountAgeMonths: accountAgeMonths,
+        eligibleToVote: accountAgeMonths >= 6
       };
+      
+      console.log('Processed Twitter data:', result);
+      return result;
     }
 
+    console.error('Unexpected API response structure');
     return null;
   } catch (error) {
     console.error('Error fetching Twitter data:', error);
     return null;
   }
+}
+
+// Generate unique citizen ID
+function generateCitizenId(firestore) {
+  return new Promise(async (resolve) => {
+    try {
+      // Get the current count of citizens
+      const snapshot = await firestore.collection('citizens').get();
+      const count = snapshot.size + 1;
+      
+      // Generate ID in format: TU0900RD001S (incrementing number)
+      const citizenId = `TU0900RD${String(count).padStart(3, '0')}S`;
+      
+      // Check if this ID already exists (just in case)
+      const existing = await firestore.collection('citizens').doc(citizenId).get();
+      if (existing.exists) {
+        // If it exists, add timestamp to make it unique
+        resolve(`TU0900RD${String(count).padStart(3, '0')}S${Date.now().toString().slice(-4)}`);
+      } else {
+        resolve(citizenId);
+      }
+    } catch (error) {
+      // Fallback to timestamp-based ID
+      const timestamp = Date.now().toString().slice(-6);
+      resolve(`TU0900RD${timestamp}S`);
+    }
+  });
 }
 
 export default async function handler(req, res) {
@@ -114,13 +154,17 @@ export default async function handler(req, res) {
     
     // Register/update user
     if (req.method === 'POST') {
-      const { uid, username, email, profilePicture, walletAddress } = req.body;
+      const { uid, username, email, profilePicture } = req.body;
+      // Do NOT use random wallet address - only use if actually provided by Privy
       
       console.log('Registering user:', { uid, username });
       
       if (!uid) {
         return res.status(400).json({ error: 'User ID is required' });
       }
+      
+      // Generate citizen ID
+      const citizenId = await generateCitizenId(firestore);
       
       // Fetch Twitter data if username provided
       let twitterData = null;
@@ -132,10 +176,11 @@ export default async function handler(req, res) {
       
       const userData = {
         uid,
+        citizenId, // Custom citizen ID like TU0900RD001S
         username: username || 'Anonymous',
         email: email || null,
         profilePicture: profilePicture || twitterData?.profileImageUrl || null,
-        walletAddress: walletAddress || null,
+        walletAddress: null, // Only set when user actually connects wallet
         registeredAt: admin.firestore.FieldValue.serverTimestamp(),
         lastActive: admin.firestore.FieldValue.serverTimestamp(),
         isActive: true,
@@ -159,11 +204,11 @@ export default async function handler(req, res) {
       // Save to users collection
       await firestore.collection('users').doc(uid).set(userData, { merge: true });
       
-      // Also save to citizens collection
-      await firestore.collection('citizens').doc(uid).set({
+      // Save to citizens collection with citizenId as document ID
+      await firestore.collection('citizens').doc(citizenId).set({
         ...userData,
-        citizenNumber: Date.now()
-      }, { merge: true });
+        citizenNumber: citizenId
+      });
       
       return res.status(200).json({ 
         success: true, 
