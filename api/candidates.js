@@ -100,8 +100,23 @@ export default async function handler(req, res) {
         }
       }
       
+      // Include Twitter data from user profile
+      let twitterData = {};
+      if (candidateData.userId) {
+        const userDoc = await firestore.collection('users').doc(candidateData.userId).get();
+        if (userDoc.exists) {
+          const user = userDoc.data();
+          twitterData = {
+            twitterFollowers: user.twitterFollowers || 0,
+            twitterVerified: user.twitterVerified || false,
+            twitterAccountAgeMonths: user.twitterAccountAgeMonths || 0
+          };
+        }
+      }
+      
       const docData = {
         ...candidateData,
+        ...twitterData,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         isActive: true,
