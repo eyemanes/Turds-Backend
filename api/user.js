@@ -61,7 +61,7 @@ async function fetchTwitterData(username) {
       const core = userData.core || {};
       const verificationInfo = userData.verification_info || {};
       
-      // Parse account creation date from core.created_at
+      // Parse account creation date
       let accountAgeMonths = 0;
       let accountCreatedAt = null;
       
@@ -108,33 +108,35 @@ export default async function handler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  try {
-    // Initialize Firebase
-    const firestore = initializeFirebase();
-    
-    if (!firestore) {
-      return res.status(200).json({
-        success: false,
-        message: 'Database not configured'
-      });
-    }
+  const firestore = initializeFirebase();
+  
+  if (!firestore) {
+    return res.status(200).json({
+      success: false,
+      message: 'Database not configured'
+    });
+  }
 
-    // Refresh Twitter data endpoint
-    if (req.method === 'POST' && req.query.action === 'refresh') {
+  try {
+    // Handle different actions based on query parameter
+    const { action } = req.query;
+
+    // REFRESH TWITTER DATA
+    if (action === 'refresh-twitter' && req.method === 'POST') {
       const { userId, username } = req.body;
       
       if (!userId || !username) {
         return res.status(400).json({ error: 'User ID and username required' });
       }
       
-      console.log('Manually refreshing Twitter data for:', username);
+      console.log('Refreshing Twitter data for:', username);
       
       const twitterData = await fetchTwitterData(username);
       
@@ -178,9 +180,122 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(404).json({ error: 'Endpoint not found' });
+    // REGISTER/UPDATE USER (from auth.js)
+    if (req.method === 'POST' && !action) {
+      const userData = req.body;
+      
+      if (!userData.uid) {
+        return res.status(400).json({ error: 'User ID required' });
+      }
+
+      // Fetch Twitter data if username provided
+      let twitterData = null;
+      if (userData.username) {
+        twitterData = await fetchTwitterData(userData.username);
+      }
+
+      const userRecord = {
+        uid: userData.uid,
+        username: userData.username || null,
+        email: userData.email || null,
+        profilePicture: userData.profilePicture || null,
+        walletAddress: userData.walletAddress || null,
+        lastLogin: admin.firestore.FieldValue.serverTimestamp(),
+        lastActive: admin.firestore.FieldValue.serverTimestamp(),
+        ...(twitterData ? {
+          twitterFollowers: twitterData.followers,
+          twitterFollowing: twitterData.following,
+          twitterTweets: twitterData.tweets,
+          twitterVerified: twitterData.verified,
+          twitterBio: twitterData.description,
+          twitterAccountCreatedAt: twitterData.accountCreatedAt,
+          twitterAccountAgeMonths: twitterData.accountAgeMonths,
+          eligibleToVote: twitterData.eligibleToVote,
+          eligibleForCandidacy: twitterData.followers >= 500,
+          twitterDataFetchedAt: admin.firestore.FieldValue.serverTimestamp()
+        } : {})
+      };
+
+      // Create or update user
+      await firestore.collection('users').doc(userData.uid).set(userRecord, { merge: true });
+
+      // Also add to citizens collection if new
+      const citizenQuery = await firestore.collection('citizens').where('uid', '==', userData.uid).get();
+      
+      if (citizenQuery.empty) {
+        await firestore.collection('citizens').add({
+          ...userRecord,
+          role: 'citizen',
+          joinedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      } else {
+        // Update existing citizen record
+        const citizenDoc = citizenQuery.docs[0];
+        await firestore.collection('citizens').doc(citizenDoc.id).update({
+          ...userRecord,
+          lastActive: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
+
+      return res.status(200).json({ 
+        success: true, 
+        user: userRecord,
+        twitterData: twitterData
+      });
+    }
+
+    // GET USER
+    if (req.method === 'GET') {
+      const { uid } = req.query;
+      
+      if (!uid) {
+        return res.status(400).json({ error: 'User ID required' });
+      }
+
+      const userDoc = await firestore.collection('users').doc(uid).get();
+      
+      if (!userDoc.exists) {
+        return res.status(404).json({ 
+          success: false, 
+          message: 'User not found' 
+        });
+      }
+
+      const userData = userDoc.data();
+      
+      return res.status(200).json({ 
+        success: true, 
+        user: {
+          id: userDoc.id,
+          ...userData,
+          lastLogin: userData.lastLogin?.toDate?.()?.toISOString() || null,
+          lastActive: userData.lastActive?.toDate?.()?.toISOString() || null
+        }
+      });
+    }
+
+    // UPDATE USER
+    if (req.method === 'PUT') {
+      const { uid, ...updates } = req.body;
+      
+      if (!uid) {
+        return res.status(400).json({ error: 'User ID required' });
+      }
+
+      await firestore.collection('users').doc(uid).update({
+        ...updates,
+        lastActive: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      return res.status(200).json({ 
+        success: true, 
+        message: 'User updated successfully' 
+      });
+    }
+
+    return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    console.error('Twitter refresh error:', error);
+    console.error('User API error:', error);
     return res.status(500).json({ 
       error: 'Internal server error',
       details: error.message
