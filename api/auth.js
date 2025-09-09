@@ -53,22 +53,26 @@ async function fetchTwitterData(username) {
     }
 
     const data = await response.json();
-    console.log('Twitter API response:', data);
+    console.log('Twitter API full response:', JSON.stringify(data, null, 2));
     
-    // Extract data from the API response structure
+    // Navigate to the correct location in the response
     if (data && data.result && data.result.data && data.result.data.user && data.result.data.user.result) {
       const userData = data.result.data.user.result;
       const legacy = userData.legacy || {};
+      const core = userData.core || {};
+      const verificationInfo = userData.verification_info || {};
       
+      console.log('Core data:', core);
       console.log('Legacy data:', legacy);
+      console.log('Verification info:', verificationInfo);
       
-      // Parse account creation date properly
+      // Parse account creation date from core.created_at
       let accountAgeMonths = 0;
       let accountCreatedAt = null;
       
-      if (legacy.created_at) {
-        // Twitter date format: "Wed Oct 10 20:19:24 +0000 2007"
-        accountCreatedAt = new Date(legacy.created_at);
+      if (core.created_at) {
+        // Twitter date format from core: "Tue May 21 05:04:56 +0000 2024"
+        accountCreatedAt = new Date(core.created_at);
         const now = new Date();
         const diffTime = Math.abs(now - accountCreatedAt);
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -78,16 +82,24 @@ async function fetchTwitterData(username) {
         console.log('Account age in months:', accountAgeMonths);
       }
       
+      // Check verification status - multiple ways to be verified
+      const isVerified = userData.is_blue_verified || 
+                        legacy.verified || 
+                        verificationInfo.is_identity_verified || 
+                        false;
+      
       const result = {
         followers: legacy.followers_count || 0,
         following: legacy.friends_count || 0,
         tweets: legacy.statuses_count || 0,
-        verified: legacy.verified || false,
-        profileImageUrl: legacy.profile_image_url_https?.replace('_normal', '_400x400') || null,
+        verified: isVerified,
+        profileImageUrl: userData.avatar?.image_url || legacy.profile_image_url_https?.replace('_normal', '_400x400') || null,
         description: legacy.description || '',
         accountCreatedAt: accountCreatedAt ? accountCreatedAt.toISOString() : null,
         accountAgeMonths: accountAgeMonths,
-        eligibleToVote: accountAgeMonths >= 6
+        eligibleToVote: accountAgeMonths >= 6,
+        screenName: core.screen_name || cleanUsername,
+        name: core.name || ''
       };
       
       console.log('Processed Twitter data:', result);
