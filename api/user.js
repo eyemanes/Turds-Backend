@@ -42,7 +42,7 @@ async function fetchTwitterData(username) {
     const response = await fetch(`https://twitter241.p.rapidapi.com/user?username=${cleanUsername}`, {
       method: 'GET',
       headers: {
-        'x-rapidapi-key': process.env.RAPIDAPI_KEY || '20fd5100f3msh8ad5102149a060ep18b8adjsn04eed04ad53d',
+        'x-rapidapi-key': process.env.RAPIDAPI_KEY,
         'x-rapidapi-host': 'twitter241.p.rapidapi.com'
       }
     });

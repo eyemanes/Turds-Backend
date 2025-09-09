@@ -13,7 +13,8 @@
   "dependencies": {
     "@solana/web3.js": "^1.87.6",
     "@vercel/node": "^3.0.0",
-    "firebase-admin": "^11.11.1"
+    "firebase-admin": "^11.11.1",
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",
