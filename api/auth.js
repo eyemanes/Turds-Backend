@@ -200,7 +200,29 @@ export default async function handler(req, res) {
         // Check if eligible to be candidate (min 500 followers)
         eligibleForCandidacy: (twitterData?.followers || 0) >= 500
       };
+      
+      console.log('User eligibility:', {
+        followers: userData.twitterFollowers,
+        eligible: userData.eligibleForCandidacy,
+        accountAge: userData.twitterAccountAgeMonths
+      });
 
+      // Check if user exists first
+      const existingUser = await firestore.collection('users').doc(uid).get();
+      
+      if (existingUser.exists) {
+        // User exists, just update last active
+        await firestore.collection('users').doc(uid).update({
+          lastActive: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        return res.status(200).json({ 
+          success: true, 
+          user: existingUser.data(),
+          message: 'User already registered'
+        });
+      }
+      
       // Save to users collection
       await firestore.collection('users').doc(uid).set(userData, { merge: true });
       
@@ -240,6 +262,11 @@ export default async function handler(req, res) {
           message: 'User not registered yet'
         });
       }
+      
+      // Update last active whenever user is fetched
+      await firestore.collection('users').doc(uid).update({
+        lastActive: admin.firestore.FieldValue.serverTimestamp()
+      });
       
       const userData = userDoc.data();
       
