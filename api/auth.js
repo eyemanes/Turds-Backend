@@ -167,7 +167,13 @@ export default async function handler(req, res) {
       const userDoc = await firestore.collection('users').doc(uid).get();
       
       if (!userDoc.exists) {
-        return res.status(404).json({ error: 'User not found' });
+        // User doesn't exist yet, return empty user data
+        console.log('User not found in database:', uid);
+        return res.status(200).json({ 
+          success: true, 
+          user: null,
+          message: 'User not registered yet'
+        });
       }
       
       const userData = userDoc.data();
