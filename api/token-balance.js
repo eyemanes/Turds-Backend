@@ -44,17 +44,19 @@ export default async function handler(req, res) {
       });
     }
 
-    // For now, return mock data
-    // In production, this would call the actual Solana RPC
-    console.log('Returning mock balance for testing');
+    // For now, return mock data for testing
+    // You can adjust this value to test different scenarios
+    const mockBalance = 10000000; // 10M tokens
+    console.log('Returning mock balance for testing:', mockBalance);
     
     return res.status(200).json({
       success: true,
-      balance: '5000000000000000', // 5M tokens with 9 decimals
+      balance: (mockBalance * 1000000000).toString(), // Convert to smallest unit (9 decimals)
       decimals: 9,
-      uiAmount: 5000000,
+      uiAmount: mockBalance,
       mock: true,
-      message: 'Mock data for testing',
+      message: `Mock data: ${mockBalance.toLocaleString()} $TURDS`,
+      walletAddress: walletAddress,
       timestamp: Date.now()
     });
 
