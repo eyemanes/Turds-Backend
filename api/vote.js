@@ -41,6 +41,24 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Voter and candidate IDs required' });
       }
 
+      // Check voter eligibility (6+ months old Twitter account)
+      const voterDoc = await db.collection('users').doc(voterId).get();
+      
+      if (!voterDoc.exists) {
+        return res.status(403).json({ error: 'User not found' });
+      }
+      
+      const voterData = voterDoc.data();
+      
+      // Check if account is old enough to vote
+      if (!voterData.eligibleToVote || voterData.twitterAccountAgeMonths < 6) {
+        return res.status(403).json({ 
+          error: 'Your Twitter account must be at least 6 months old to vote',
+          accountAge: voterData.twitterAccountAgeMonths || 0,
+          required: 6
+        });
+      }
+
       // Check if already voted
       const existingVote = await db.collection('votes')
         .where('voterId', '==', voterId)

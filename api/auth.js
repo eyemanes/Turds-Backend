@@ -54,16 +54,31 @@ async function fetchTwitterData(username) {
     const data = await response.json();
     
     // Extract follower data from the response
-    // The API response structure may vary, adjust as needed
     if (data && data.result && data.result.data && data.result.data.user) {
       const userData = data.result.data.user.result;
+      const legacy = userData.legacy || {};
+      
+      // Parse account creation date
+      let accountAge = null;
+      let accountCreatedAt = null;
+      if (legacy.created_at) {
+        accountCreatedAt = new Date(legacy.created_at);
+        const now = new Date();
+        const ageInMonths = (now.getFullYear() - accountCreatedAt.getFullYear()) * 12 + 
+                           (now.getMonth() - accountCreatedAt.getMonth());
+        accountAge = ageInMonths;
+      }
+      
       return {
-        followers: userData.legacy?.followers_count || 0,
-        following: userData.legacy?.friends_count || 0,
-        tweets: userData.legacy?.statuses_count || 0,
-        verified: userData.legacy?.verified || false,
-        profileImageUrl: userData.legacy?.profile_image_url_https?.replace('_normal', '_400x400'),
-        description: userData.legacy?.description || ''
+        followers: legacy.followers_count || 0,
+        following: legacy.friends_count || 0,
+        tweets: legacy.statuses_count || 0,
+        verified: legacy.verified || false,
+        profileImageUrl: legacy.profile_image_url_https?.replace('_normal', '_400x400'),
+        description: legacy.description || '',
+        accountCreatedAt: accountCreatedAt ? accountCreatedAt.toISOString() : null,
+        accountAgeMonths: accountAge || 0,
+        eligibleToVote: accountAge >= 6 // Account must be 6+ months old to vote
       };
     }
 
@@ -101,6 +116,8 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const { uid, username, email, profilePicture, walletAddress } = req.body;
       
+      console.log('Registering user:', { uid, username });
+      
       if (!uid) {
         return res.status(400).json({ error: 'User ID is required' });
       }
@@ -131,9 +148,12 @@ export default async function handler(req, res) {
         twitterTweets: twitterData?.tweets || 0,
         twitterVerified: twitterData?.verified || false,
         twitterBio: twitterData?.description || '',
+        twitterAccountCreatedAt: twitterData?.accountCreatedAt || null,
+        twitterAccountAgeMonths: twitterData?.accountAgeMonths || 0,
+        eligibleToVote: twitterData?.eligibleToVote || false,
         twitterDataFetchedAt: admin.firestore.FieldValue.serverTimestamp(),
-        // Check if eligible to be candidate (min 1000 followers)
-        eligibleForCandidacy: (twitterData?.followers || 0) >= 1000
+        // Check if eligible to be candidate (min 500 followers)
+        eligibleForCandidacy: (twitterData?.followers || 0) >= 500
       };
 
       // Save to users collection
@@ -189,7 +209,7 @@ export default async function handler(req, res) {
             twitterVerified: twitterData.verified,
             twitterBio: twitterData.description,
             twitterDataFetchedAt: admin.firestore.FieldValue.serverTimestamp(),
-            eligibleForCandidacy: twitterData.followers >= 1000
+            eligibleForCandidacy: twitterData.followers >= 500
           };
           
           await firestore.collection('users').doc(uid).update(updates);

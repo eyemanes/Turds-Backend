@@ -77,12 +77,12 @@ export default async function handler(req, res) {
         if (userDoc.exists) {
           const userData = userDoc.data();
           
-          // Check follower requirement (min 1000)
-          if (userData.twitterFollowers < 1000) {
+          // Check follower requirement (min 500)
+          if (userData.twitterFollowers < 500) {
             return res.status(403).json({ 
-              error: 'Minimum 1000 Twitter followers required to run for office',
+              error: 'Minimum 500 Twitter followers required to run for office',
               currentFollowers: userData.twitterFollowers || 0,
-              required: 1000
+              required: 500
             });
           }
         }
