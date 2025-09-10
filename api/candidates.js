@@ -82,13 +82,25 @@ export default async function handler(req, res) {
             eligible: userData.eligibleForCandidacy
           });
           
-          // Check follower requirement (min 500)
-          if (!userData.twitterFollowers || userData.twitterFollowers < 500) {
+          // Check eligibility requirements (500+ followers AND 1M+ tokens)
+          const hasEnoughFollowers = userData.twitterFollowers && userData.twitterFollowers >= 500;
+          const hasEnoughTokens = userData.tokenBalance && userData.tokenBalance >= 1000000;
+          
+          if (!hasEnoughFollowers) {
             console.log('Follower requirement not met:', userData.twitterFollowers);
             return res.status(403).json({ 
               error: 'Minimum 500 Twitter followers required to run for office',
               currentFollowers: userData.twitterFollowers || 0,
               required: 500
+            });
+          }
+          
+          if (!hasEnoughTokens) {
+            console.log('Token requirement not met:', userData.tokenBalance);
+            return res.status(403).json({ 
+              error: 'Minimum 1,000,000 TURDS tokens required to run for office',
+              currentTokens: userData.tokenBalance || 0,
+              required: 1000000
             });
           }
         } else {

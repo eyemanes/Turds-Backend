@@ -115,15 +115,20 @@ export default async function handler(req, res) {
       if (twitterUsername && twitterUsername !== 'Anonymous' && twitterUsername !== 'null' && twitterUsername !== 'undefined') {
         console.log('Starting Twitter fetch for:', twitterUsername);
         try {
-          // Use node-fetch with proper error handling
+          // Use AbortController for proper timeout handling
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+          
           const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${twitterUsername}`, {
             method: 'GET',
             headers: {
               'x-rapidapi-key': process.env.RAPIDAPI_KEY || '20fd5100f3msh8ad5102149a060ep18b8adjsn04eed04ad53d',
               'x-rapidapi-host': 'twitter241.p.rapidapi.com'
             },
-            timeout: 15000 // 15 second timeout
+            signal: controller.signal
           });
+          
+          clearTimeout(timeoutId);
 
           console.log('Twitter API response status:', twitterResponse.status);
 
@@ -174,8 +179,8 @@ export default async function handler(req, res) {
               accountAgeMonths = Math.floor((now - createdDate) / (1000 * 60 * 60 * 24 * 30));
             }
 
-            // Check candidacy eligibility (500+ followers OR 1M+ tokens)
-            const eligibleForCandidacy = followerCount >= 500 || userRecord.tokenBalance >= 1000000;
+            // Check candidacy eligibility (500+ followers AND 1M+ tokens)
+            const eligibleForCandidacy = followerCount >= 500 && userRecord.tokenBalance >= 1000000;
 
             // Store Twitter data in separate collection
             const twitterDataToStore = {
@@ -215,8 +220,20 @@ export default async function handler(req, res) {
             console.error('Twitter API error response:', errorText);
           }
         } catch (error) {
-          console.error('Error fetching Twitter data during registration:', error);
-          // Don't fail registration if Twitter fetch fails
+          if (error.name === 'AbortError') {
+            console.error('Twitter API timeout for', twitterUsername, 'after 15 seconds');
+          } else {
+            console.error('Error fetching Twitter data during registration:', error);
+          }
+          
+          // Store user with Twitter data pending flag
+          await firestore.collection('users').doc(userData.uid).update({
+            twitterUsername: twitterUsername,
+            twitterDataPending: true,
+            twitterDataFetchedAt: null
+          });
+          
+          console.log('User registered with Twitter data pending fetch');
         }
       } else {
         console.log('SKIPPING Twitter fetch - Reason:', {
@@ -360,7 +377,7 @@ export default async function handler(req, res) {
               // Also update eligibility based on new token balance
               const userDoc = await firestore.collection('users').doc(userId).get();
               const currentFollowers = userDoc.data()?.twitterFollowers || 0;
-              updateData.eligibleForCandidacy = currentFollowers >= 500 || updateData.tokenBalance >= 1000000;
+              updateData.eligibleForCandidacy = currentFollowers >= 500 && updateData.tokenBalance >= 1000000;
             }
           } catch (error) {
             console.error('Error fetching token balance:', error);
@@ -457,7 +474,7 @@ export default async function handler(req, res) {
         // Get current token balance to check eligibility
         const userDoc = await firestore.collection('users').doc(userId).get();
         const currentTokenBalance = userDoc.data()?.tokenBalance || 0;
-        const eligibleForCandidacy = followerCount >= 500 || currentTokenBalance >= 1000000;
+        const eligibleForCandidacy = followerCount >= 500 && currentTokenBalance >= 1000000;
 
         // Calculate account age in months
         let accountAgeMonths = 0;
