@@ -2,6 +2,7 @@
   "name": "turds-nation-backend",
   "version": "2.1.0",
   "description": "TURDS Nation Backend API - Optimized Production Version",
+  "type": "module",
   "main": "server-optimized.js",
   "engines": {
     "node": ">=18.x"
