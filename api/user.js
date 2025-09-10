@@ -267,10 +267,22 @@ export default async function handler(req, res) {
         // If wallet address provided, fetch token balance
         if (walletAddress) {
           try {
-            const tokenResponse = await fetch(`https://turds-backend.vercel.app/api/token-balance?wallet=${walletAddress}`);
+            const tokenResponse = await fetch(`https://turds-backend.vercel.app/api/token-balance`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                walletAddress: walletAddress,
+                mintAddress: process.env.TURDS_MINT_ADDRESS || '5tiJnwdL5WrCFa7K4eKHRjRtqgX9z2hmbn3LACNApump'
+              })
+            });
             if (tokenResponse.ok) {
               const tokenData = await tokenResponse.json();
               updateData.tokenBalance = tokenData.uiAmount || 0;
+              
+              // Also update eligibility based on new token balance
+              const userDoc = await firestore.collection('users').doc(userId).get();
+              const currentFollowers = userDoc.data()?.twitterFollowers || 0;
+              updateData.eligibleForCandidacy = currentFollowers >= 500 || updateData.tokenBalance >= 1000000;
             }
           } catch (error) {
             console.error('Error fetching token balance:', error);
@@ -406,12 +418,18 @@ export default async function handler(req, res) {
 
         console.log(`Twitter data for @${username}: ${followerCount} followers, verified: ${verified}`);
 
+        // Get current token balance to check eligibility
+        const userDoc = await firestore.collection('users').doc(userId).get();
+        const currentTokenBalance = userDoc.data()?.tokenBalance || 0;
+        const eligibleForCandidacy = followerCount >= 500 || currentTokenBalance >= 1000000;
+
         // Update user in database with Twitter data
         await firestore.collection('users').doc(userId).update({
           twitterUsername: username,
           twitterFollowers: followerCount,
           twitterVerified: verified,
-          twitterLastUpdated: admin.firestore.FieldValue.serverTimestamp()
+          twitterLastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+          eligibleForCandidacy: eligibleForCandidacy
         });
 
         return res.status(200).json({ 
