@@ -1,4 +1,6 @@
 // Token balance endpoint for Solana tokens using Helius RPC
+import admin from 'firebase-admin';
+
 export default async function handler(req, res) {
   // Set comprehensive CORS headers
   const allowedOrigins = [
@@ -151,7 +153,6 @@ export default async function handler(req, res) {
           console.log('Storing token balance for user:', uid);
           
           // Initialize Firebase
-          const admin = require('firebase-admin');
           if (!admin.apps.length) {
             const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
             admin.initializeApp({

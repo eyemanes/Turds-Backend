@@ -163,7 +163,7 @@ export default async function handler(req, res) {
             const eligibleForCandidacy = followerCount >= 500 || userRecord.tokenBalance >= 1000000;
 
             // Store Twitter data in separate collection
-            const twitterData = {
+            const twitterDataToStore = {
               userId: userData.uid,
               username: twitterUsername,
               followers: followerCount,
@@ -179,7 +179,7 @@ export default async function handler(req, res) {
             };
 
             // Store in twitter_data collection
-            await firestore.collection('twitter_data').doc(userData.uid).set(twitterData, { merge: true });
+            await firestore.collection('twitter_data').doc(userData.uid).set(twitterDataToStore, { merge: true });
 
             // Update user with basic Twitter info
             const userUpdate = {
