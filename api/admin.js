@@ -70,8 +70,8 @@ export default async function handler(req, res) {
   try {
     const { action } = req.query;
 
-    // ADMIN LOGIN
-    if (action === 'login' && req.method === 'POST') {
+    // ADMIN LOGIN (support both old and new endpoints)
+    if ((action === 'login' || action === 'authenticate') && req.method === 'POST') {
       const { username, password } = req.body;
 
       // Check environment variables for admin credentials
@@ -170,6 +170,59 @@ export default async function handler(req, res) {
           message: 'Announcement deleted successfully'
         });
       }
+    }
+
+    // MANAGE USERS - Set admin status
+    if (action === 'set-admin' && req.method === 'POST') {
+      const { userId, isAdmin, adminPassword } = req.body;
+      
+      // Verify admin password
+      const adminPasswordEnv = process.env.ADMIN_PASSWORD;
+      if (!adminPasswordEnv || adminPassword !== adminPasswordEnv) {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Unauthorized - invalid admin password' 
+        });
+      }
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID required' });
+      }
+      
+      // Update user's admin status
+      await firestore.collection('users').doc(userId).update({
+        isAdmin: isAdmin === true,
+        adminGrantedAt: isAdmin ? admin.firestore.FieldValue.serverTimestamp() : null
+      });
+      
+      return res.status(200).json({ 
+        success: true, 
+        message: `User ${isAdmin ? 'granted' : 'revoked'} admin access`
+      });
+    }
+
+    // GET ALL USERS (for admin panel)
+    if (action === 'users' && req.method === 'GET') {
+      const usersSnapshot = await firestore.collection('users').get();
+      const users = [];
+      
+      usersSnapshot.forEach(doc => {
+        const data = doc.data();
+        users.push({
+          id: doc.id,
+          username: data.username || 'Anonymous',
+          email: data.email,
+          isAdmin: data.isAdmin || false,
+          twitterFollowers: data.twitterFollowers || 0,
+          walletAddress: data.walletAddress,
+          lastLogin: data.lastLogin?.toDate?.()?.toISOString() || null
+        });
+      });
+      
+      return res.status(200).json({ 
+        success: true, 
+        users 
+      });
     }
 
     return res.status(400).json({ error: 'Invalid action' });
