@@ -99,8 +99,8 @@ export default async function handler(req, res) {
 
       await firestore.collection('users').doc(userData.uid).set(userRecord, { merge: true });
 
-      // If Twitter username provided and no followers data, fetch it
-      if (userData.twitterUsername && !existingData.twitterFollowers) {
+      // ALWAYS fetch Twitter data on registration if username provided
+      if (userData.twitterUsername) {
         try {
           console.log('Fetching Twitter data for:', userData.twitterUsername);
           const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${userData.twitterUsername}`, {
@@ -307,63 +307,7 @@ export default async function handler(req, res) {
       }
     }
     
-    // GET USER DATA
-    if (action === 'get-user') {
-      const userId = req.query.userId || req.body.userId;
-      
-      if (!userId) {
-        return res.status(400).json({ error: 'Missing userId' });
-      }
-      
-      try {
-        const userDoc = await firestore.collection('users').doc(userId).get();
-        
-        if (!userDoc.exists) {
-          return res.status(404).json({ error: 'User not found' });
-        }
-        
-        const userData = userDoc.data();
-        return res.status(200).json({
-          success: true,
-          user: {
-            // Basic Info
-            uid: userId,
-            username: userData.username || 'Anonymous',
-            email: userData.email || null,
-            profilePicture: userData.profilePicture || null,
-            
-            // Twitter Data
-            twitterUsername: userData.twitterUsername || null,
-            twitterFollowers: userData.twitterFollowers || 0,
-            twitterFollowing: userData.twitterFollowing || 0,
-            twitterTweets: userData.twitterTweets || 0,
-            twitterVerified: userData.twitterVerified || false,
-            twitterBio: userData.twitterBio || null,
-            twitterAccountCreatedAt: userData.twitterAccountCreatedAt || null,
-            twitterAccountAgeMonths: userData.twitterAccountAgeMonths || 0,
-            twitterDataFetchedAt: userData.twitterDataFetchedAt || null,
-            
-            // Wallet & Tokens
-            walletAddress: userData.walletAddress || null,
-            tokenBalance: userData.tokenBalance || 0,
-            
-            // Eligibility & Roles
-            eligibleToVote: userData.eligibleToVote !== false,
-            eligibleForCandidacy: userData.eligibleForCandidacy || false,
-            role: userData.role || 'citizen',
-            isAdmin: userData.isAdmin || false,
-            
-            // Timestamps
-            joinedAt: userData.joinedAt || null,
-            lastLogin: userData.lastLogin || null,
-            lastActive: userData.lastActive || null
-          }
-        });
-      } catch (error) {
-        console.error('Error fetching user:', error);
-        return res.status(500).json({ error: 'Failed to fetch user' });
-      }
-    }
+    // GET USER DATA (removed duplicate - using the one above)
 
     // REFRESH TWITTER DATA
     if (action === 'refresh-twitter') {
