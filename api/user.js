@@ -146,7 +146,7 @@ export default async function handler(req, res) {
             // Check candidacy eligibility (500+ followers OR 1M+ tokens)
             const eligibleForCandidacy = followerCount >= 500 || userRecord.tokenBalance >= 1000000;
 
-            // Update user with Twitter data
+            // Update user with Twitter data IMMEDIATELY
             const twitterUpdate = {
               twitterFollowers: followerCount,
               twitterFollowing: followingCount,
@@ -161,18 +161,29 @@ export default async function handler(req, res) {
 
             await firestore.collection('users').doc(userData.uid).update(twitterUpdate);
             
-            // Update the userRecord for response
+            // Update the userRecord for response to include Twitter data
             Object.assign(userRecord, twitterUpdate);
             console.log(`Twitter data updated: ${followerCount} followers, eligible: ${eligibleForCandidacy}`);
           }
         } catch (error) {
           console.error('Error fetching Twitter data during registration:', error);
+          // Don't fail registration if Twitter fetch fails
         }
       }
+      
+      // Re-fetch the complete user record after all updates
+      const finalUserDoc = await firestore.collection('users').doc(userData.uid).get();
+      const finalUserData = finalUserDoc.data();
 
       return res.status(200).json({ 
         success: true, 
-        user: userRecord,
+        user: {
+          uid: userData.uid,
+          ...finalUserData,
+          // Ensure Twitter data is included
+          twitterFollowers: finalUserData.twitterFollowers || 0,
+          eligibleForCandidacy: finalUserData.eligibleForCandidacy || false
+        },
         message: 'User registered successfully'
       });
     }

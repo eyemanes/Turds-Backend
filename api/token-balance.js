@@ -1,22 +1,44 @@
 // Token balance endpoint for Solana tokens using Helius RPC
 export default async function handler(req, res) {
-  // Set CORS headers for ALL requests
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // Set comprehensive CORS headers
+  const allowedOrigins = [
+    'https://turds-front-w625.vercel.app',
+    'https://turds-nation.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000'
+  ];
+  
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
   
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  if (req.method !== 'POST') {
+  // Accept both GET and POST
+  if (req.method !== 'POST' && req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const { walletAddress, mintAddress, uid } = req.body;
+    // Get data from either POST body or GET query params
+    let walletAddress, mintAddress, uid;
+    
+    if (req.method === 'POST') {
+      ({ walletAddress, mintAddress, uid } = req.body);
+    } else {
+      ({ wallet: walletAddress, mint: mintAddress, uid } = req.query);
+    }
     
     // Use the TURDS mint address from env or passed value
     const tokenMint = mintAddress || process.env.TURDS_MINT_ADDRESS || '5tiJnwdL5WrCFa7K4eKHRjRtqgX9z2hmbn3LACNApump';
