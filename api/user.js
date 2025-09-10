@@ -56,6 +56,7 @@ export default async function handler(req, res) {
       
       console.log('=== REGISTRATION DEBUG ===');
       console.log('Received userData:', JSON.stringify(userData, null, 2));
+      console.log('User ID being used:', userData.uid);
       console.log('twitterUsername value:', userData.twitterUsername);
       console.log('twitterUsername type:', typeof userData.twitterUsername);
       console.log('twitterUsername truthy:', !!userData.twitterUsername);
@@ -217,6 +218,10 @@ export default async function handler(req, res) {
     if (action === 'get-user') {
       const userId = req.query.userId || req.query.uid;
       
+      console.log('=== GET USER DEBUG ===');
+      console.log('Requested userId:', userId);
+      console.log('Query params:', req.query);
+      
       if (!userId) {
         return res.status(400).json({ error: 'User ID required' });
       }
@@ -224,7 +229,11 @@ export default async function handler(req, res) {
       try {
         const userDoc = await firestore.collection('users').doc(userId).get();
         
+        console.log('User document exists:', userDoc.exists);
+        console.log('User document data:', userDoc.data());
+        
         if (!userDoc.exists) {
+          console.log('User not found in database for ID:', userId);
           return res.status(404).json({ 
             success: false, 
             message: 'User not found' 

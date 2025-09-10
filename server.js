@@ -261,29 +261,8 @@ app.post('/api/verify-holding', async (req, res) => {
   }
 });
 
-// User endpoint placeholder
-app.get('/api/user', (req, res) => {
-  const { action, userId } = req.query;
-  
-  // Return mock data for now
-  res.json({
-    success: true,
-    user: {
-      id: userId,
-      twitterFollowers: 1500, // Mock followers
-      twitterVerified: true,
-      walletAddress: null
-    }
-  });
-});
-
-// Candidates endpoint placeholder
-app.get('/api/candidates', (req, res) => {
-  res.json({
-    success: true,
-    candidates: [] // Empty array for now
-  });
-});
+// Note: User and candidates endpoints are handled by individual API files
+// in the /api directory for better Vercel function isolation
 
 // 404 handler
 app.use('*', (req, res) => {
