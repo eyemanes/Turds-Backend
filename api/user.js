@@ -330,7 +330,7 @@ export default async function handler(req, res) {
             eligibleToVote: userData.eligibleToVote !== false,
             eligibleForCandidacy: userData.eligibleForCandidacy || false,
             role: userData.role || 'citizen',
-            isAdmin: false, // Only set by server-side admin functions
+            isAdmin: userData.isAdmin || false, // Return actual admin status from database
             
             // Timestamps
             joinedAt: userData.joinedAt || null,
