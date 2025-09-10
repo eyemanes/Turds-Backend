@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { solanaService } from '../lib/solana'
+import { solanaService } from '../lib/solana.js'
 
 // CORS headers
 const corsHeaders = {

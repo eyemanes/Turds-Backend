@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { solanaService } from '../lib/solana'
-import { firebaseService } from '../lib/firebase'
+import { solanaService } from '../lib/solana.js'
+import { firebaseService } from '../lib/firebase.js'
 
 // CORS headers
 const corsHeaders = {
