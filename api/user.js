@@ -412,6 +412,30 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Missing userId or username' });
       }
 
+      // Rate limiting: 1 refresh per day
+      try {
+        const userDoc = await firestore.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        
+        if (userData?.twitterDataFetchedAt) {
+          const lastRefresh = userData.twitterDataFetchedAt.toDate();
+          const now = new Date();
+          const hoursSinceLastRefresh = (now - lastRefresh) / (1000 * 60 * 60);
+          
+          if (hoursSinceLastRefresh < 24) {
+            const hoursRemaining = Math.ceil(24 - hoursSinceLastRefresh);
+            return res.status(429).json({ 
+              error: 'Rate limit exceeded',
+              message: `Twitter data can only be refreshed once per day. Try again in ${hoursRemaining} hours.`,
+              nextRefreshAvailable: new Date(lastRefresh.getTime() + 24 * 60 * 60 * 1000).toISOString()
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Rate limit check error:', error);
+        // Continue with refresh if rate limit check fails
+      }
+
       try {
         // Call Twitter API to get user data
         const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${username}`, {

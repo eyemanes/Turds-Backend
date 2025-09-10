@@ -149,6 +149,33 @@ export default async function handler(req, res) {
       
       // Store token balance in separate collection if uid provided
       if (uid) {
+        // Rate limiting: 1 refresh every 30 minutes
+        try {
+          const firestore = admin.firestore();
+          const userDoc = await firestore.collection('users').doc(uid).get();
+          const userData = userDoc.data();
+          
+          if (userData?.lastBalanceCheck) {
+            const lastRefresh = userData.lastBalanceCheck.toDate();
+            const now = new Date();
+            const minutesSinceLastRefresh = (now - lastRefresh) / (1000 * 60);
+            
+            if (minutesSinceLastRefresh < 30) {
+              const minutesRemaining = Math.ceil(30 - minutesSinceLastRefresh);
+              return res.status(429).json({ 
+                error: 'Rate limit exceeded',
+                message: `Token balance can only be refreshed every 30 minutes. Try again in ${minutesRemaining} minutes.`,
+                nextRefreshAvailable: new Date(lastRefresh.getTime() + 30 * 60 * 1000).toISOString(),
+                balance: userData.tokenBalance || 0,
+                uiAmount: userData.tokenBalance || 0
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Rate limit check error:', error);
+          // Continue with refresh if rate limit check fails
+        }
+
         try {
           console.log('Storing token balance for user:', uid);
           
