@@ -145,15 +145,49 @@ export default async function handler(req, res) {
         formattedAmount: uiAmount.toLocaleString() + ' TURDS'
       });
       
-      // Log to Firebase if uid provided
+      // Store token balance in separate collection if uid provided
       if (uid) {
         try {
-          console.log('Logging balance to Firebase for user:', uid);
-          const { firebaseService } = await import('../lib/firebase.js');
-          await firebaseService.logBalanceCheck(uid, walletAddress, totalBalance);
-          await firebaseService.updateTokenBalance(uid, totalBalance);
+          console.log('Storing token balance for user:', uid);
+          
+          // Initialize Firebase
+          const admin = require('firebase-admin');
+          if (!admin.apps.length) {
+            const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+            admin.initializeApp({
+              credential: admin.credential.cert({
+                projectId: process.env.FIREBASE_PROJECT_ID,
+                clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+                privateKey: privateKey,
+              })
+            });
+          }
+          
+          const firestore = admin.firestore();
+          
+          // Store in token_balances collection
+          const tokenBalanceData = {
+            userId: uid,
+            walletAddress: walletAddress,
+            mintAddress: tokenMint,
+            balance: totalBalance,
+            decimals: decimals,
+            uiAmount: uiAmount,
+            lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+          };
+          
+          await firestore.collection('token_balances').doc(uid).set(tokenBalanceData, { merge: true });
+          
+          // Also update user collection with latest balance
+          await firestore.collection('users').doc(uid).update({
+            tokenBalance: totalBalance,
+            lastBalanceCheck: admin.firestore.FieldValue.serverTimestamp()
+          });
+          
+          console.log('Token balance stored successfully');
         } catch (fbError) {
-          console.error('Firebase logging failed (non-critical):', fbError.message);
+          console.error('Firebase storage failed (non-critical):', fbError.message);
           // Continue anyway - balance fetch was successful
         }
       }

@@ -37,6 +37,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -114,12 +115,14 @@ export default async function handler(req, res) {
       if (twitterUsername && twitterUsername !== 'Anonymous' && twitterUsername !== 'null' && twitterUsername !== 'undefined') {
         console.log('Starting Twitter fetch for:', twitterUsername);
         try {
+          // Use node-fetch with proper error handling
           const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${twitterUsername}`, {
             method: 'GET',
             headers: {
               'x-rapidapi-key': process.env.RAPIDAPI_KEY || '20fd5100f3msh8ad5102149a060ep18b8adjsn04eed04ad53d',
               'x-rapidapi-host': 'twitter241.p.rapidapi.com'
-            }
+            },
+            timeout: 15000 // 15 second timeout
           });
 
           console.log('Twitter API response status:', twitterResponse.status);
@@ -159,24 +162,38 @@ export default async function handler(req, res) {
             // Check candidacy eligibility (500+ followers OR 1M+ tokens)
             const eligibleForCandidacy = followerCount >= 500 || userRecord.tokenBalance >= 1000000;
 
-            // Update user with Twitter data IMMEDIATELY
-            const twitterUpdate = {
-              twitterFollowers: followerCount,
-              twitterFollowing: followingCount,
-              twitterTweets: tweetsCount,
-              twitterVerified: verified,
-              twitterBio: bio,
-              twitterAccountCreatedAt: accountCreatedAt,
-              twitterAccountAgeMonths: accountAgeMonths,
-              twitterDataFetchedAt: admin.firestore.FieldValue.serverTimestamp(),
-              eligibleForCandidacy: eligibleForCandidacy
+            // Store Twitter data in separate collection
+            const twitterData = {
+              userId: userData.uid,
+              username: twitterUsername,
+              followers: followerCount,
+              following: followingCount,
+              tweets: tweetsCount,
+              verified: verified,
+              bio: bio,
+              accountCreatedAt: accountCreatedAt,
+              accountAgeMonths: accountAgeMonths,
+              dataFetchedAt: admin.firestore.FieldValue.serverTimestamp(),
+              eligibleForCandidacy: eligibleForCandidacy,
+              createdAt: admin.firestore.FieldValue.serverTimestamp()
             };
 
-            await firestore.collection('users').doc(userData.uid).update(twitterUpdate);
+            // Store in twitter_data collection
+            await firestore.collection('twitter_data').doc(userData.uid).set(twitterData, { merge: true });
+
+            // Update user with basic Twitter info
+            const userUpdate = {
+              twitterFollowers: followerCount,
+              twitterVerified: verified,
+              eligibleForCandidacy: eligibleForCandidacy,
+              twitterDataFetchedAt: admin.firestore.FieldValue.serverTimestamp()
+            };
+
+            await firestore.collection('users').doc(userData.uid).update(userUpdate);
             
             // Update the userRecord for response to include Twitter data
-            Object.assign(userRecord, twitterUpdate);
-            console.log(`Twitter data updated for ${twitterUsername}: ${followerCount} followers, eligible: ${eligibleForCandidacy}`);
+            Object.assign(userRecord, userUpdate);
+            console.log(`Twitter data stored for ${twitterUsername}: ${followerCount} followers, eligible: ${eligibleForCandidacy}`);
           } else {
             console.error('Twitter API error - Status:', twitterResponse.status);
             const errorText = await twitterResponse.text();
