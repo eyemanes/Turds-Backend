@@ -330,7 +330,7 @@ export default async function handler(req, res) {
             eligibleToVote: userData.eligibleToVote !== false,
             eligibleForCandidacy: userData.eligibleForCandidacy || false,
             role: userData.role || 'citizen',
-            isAdmin: userData.isAdmin || false,
+            isAdmin: false, // Only set by server-side admin functions
             
             // Timestamps
             joinedAt: userData.joinedAt || null,
@@ -621,7 +621,7 @@ export default async function handler(req, res) {
             walletAddress: userData.walletAddress || null,
             tokenBalance: userData.tokenBalance || 0,
             eligibleForCandidacy: userData.eligibleForCandidacy || false,
-            isAdmin: userData.isAdmin || false
+            isAdmin: false // Only set by server-side admin functions
           }
         });
       } catch (error) {
