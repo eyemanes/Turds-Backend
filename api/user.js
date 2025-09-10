@@ -50,7 +50,7 @@ export default async function handler(req, res) {
   try {
     const action = req.query.action || req.body.action;
 
-    // REGISTER USER (existing logic)
+    // REGISTER USER - Complete user registration with all fields
     if (action === 'register') {
       const userData = req.body;
       
@@ -62,25 +62,47 @@ export default async function handler(req, res) {
       const existingUser = await firestore.collection('users').doc(userData.uid).get();
       const existingData = existingUser.exists ? existingUser.data() : {};
 
+      // Build complete user record
       const userRecord = {
+        // Basic Info
         uid: userData.uid,
-        username: userData.username || existingData.username || 'Anonymous',
+        username: userData.username || userData.twitterUsername || existingData.username || 'Anonymous',
         email: userData.email || existingData.email || null,
         profilePicture: userData.profilePicture || existingData.profilePicture || null,
+        
+        // Twitter Data
         twitterUsername: userData.twitterUsername || existingData.twitterUsername || null,
         twitterFollowers: existingData.twitterFollowers || 0,
+        twitterFollowing: existingData.twitterFollowing || 0,
+        twitterTweets: existingData.twitterTweets || 0,
         twitterVerified: existingData.twitterVerified || false,
+        twitterBio: existingData.twitterBio || null,
+        twitterAccountCreatedAt: existingData.twitterAccountCreatedAt || null,
+        twitterAccountAgeMonths: existingData.twitterAccountAgeMonths || 0,
+        twitterDataFetchedAt: existingData.twitterDataFetchedAt || null,
+        
+        // Wallet & Tokens
         walletAddress: existingData.walletAddress || null,
+        tokenBalance: existingData.tokenBalance || 0,
+        
+        // Eligibility & Roles
+        eligibleToVote: existingData.eligibleToVote !== false, // Default true
+        eligibleForCandidacy: existingData.eligibleForCandidacy || false,
+        role: existingData.role || 'citizen',
         isAdmin: existingData.isAdmin || false,
+        
+        // Timestamps
+        joinedAt: existingData.joinedAt || admin.firestore.FieldValue.serverTimestamp(),
         lastLogin: admin.firestore.FieldValue.serverTimestamp(),
         lastActive: admin.firestore.FieldValue.serverTimestamp(),
       };
 
       await firestore.collection('users').doc(userData.uid).set(userRecord, { merge: true });
 
-      // If Twitter username provided, fetch Twitter data
+      // If Twitter username provided and no followers data, fetch it
       if (userData.twitterUsername && !existingData.twitterFollowers) {
         try {
+          console.log('Fetching Twitter data for:', userData.twitterUsername);
           const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${userData.twitterUsername}`, {
             method: 'GET',
             headers: {
@@ -91,24 +113,57 @@ export default async function handler(req, res) {
 
           if (twitterResponse.ok) {
             const twitterData = await twitterResponse.json();
-            let followerCount = 0;
-            let verified = false;
+            console.log('Twitter API response received');
             
+            let followerCount = 0;
+            let followingCount = 0;
+            let tweetsCount = 0;
+            let verified = false;
+            let bio = '';
+            let accountCreatedAt = null;
+            
+            // Extract data from Twitter API response
             if (twitterData.result) {
               const userResult = twitterData.result.result || twitterData.result;
               if (userResult.legacy) {
                 followerCount = userResult.legacy.followers_count || 0;
+                followingCount = userResult.legacy.friends_count || 0;
+                tweetsCount = userResult.legacy.statuses_count || 0;
                 verified = userResult.legacy.verified || false;
+                bio = userResult.legacy.description || '';
+                accountCreatedAt = userResult.legacy.created_at || null;
               }
             }
 
-            await firestore.collection('users').doc(userData.uid).update({
-              twitterFollowers: followerCount,
-              twitterVerified: verified
-            });
+            // Calculate account age in months
+            let accountAgeMonths = 0;
+            if (accountCreatedAt) {
+              const createdDate = new Date(accountCreatedAt);
+              const now = new Date();
+              accountAgeMonths = Math.floor((now - createdDate) / (1000 * 60 * 60 * 24 * 30));
+            }
 
-            userRecord.twitterFollowers = followerCount;
-            userRecord.twitterVerified = verified;
+            // Check candidacy eligibility (500+ followers OR 1M+ tokens)
+            const eligibleForCandidacy = followerCount >= 500 || userRecord.tokenBalance >= 1000000;
+
+            // Update user with Twitter data
+            const twitterUpdate = {
+              twitterFollowers: followerCount,
+              twitterFollowing: followingCount,
+              twitterTweets: tweetsCount,
+              twitterVerified: verified,
+              twitterBio: bio,
+              twitterAccountCreatedAt: accountCreatedAt,
+              twitterAccountAgeMonths: accountAgeMonths,
+              twitterDataFetchedAt: admin.firestore.FieldValue.serverTimestamp(),
+              eligibleForCandidacy: eligibleForCandidacy
+            };
+
+            await firestore.collection('users').doc(userData.uid).update(twitterUpdate);
+            
+            // Update the userRecord for response
+            Object.assign(userRecord, twitterUpdate);
+            console.log(`Twitter data updated: ${followerCount} followers, eligible: ${eligibleForCandidacy}`);
           }
         } catch (error) {
           console.error('Error fetching Twitter data during registration:', error);
@@ -117,7 +172,8 @@ export default async function handler(req, res) {
 
       return res.status(200).json({ 
         success: true, 
-        user: userRecord
+        user: userRecord,
+        message: 'User registered successfully'
       });
     }
 
@@ -131,16 +187,34 @@ export default async function handler(req, res) {
       
       try {
         // Update user document with wallet address
-        await firestore.collection('users').doc(userId).update({
+        const updateData = {
           walletAddress: walletAddress || null,
           walletUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
+        };
+        
+        // If wallet address provided, fetch token balance
+        if (walletAddress) {
+          try {
+            const tokenResponse = await fetch(`https://turds-backend.vercel.app/api/token-balance?wallet=${walletAddress}`);
+            if (tokenResponse.ok) {
+              const tokenData = await tokenResponse.json();
+              updateData.tokenBalance = tokenData.uiAmount || 0;
+            }
+          } catch (error) {
+            console.error('Error fetching token balance:', error);
+          }
+        } else {
+          updateData.tokenBalance = 0;
+        }
+        
+        await firestore.collection('users').doc(userId).update(updateData);
         
         console.log(`Wallet updated for user ${userId}: ${walletAddress || 'removed'}`);
         
         return res.status(200).json({ 
           success: true, 
           walletAddress: walletAddress,
+          tokenBalance: updateData.tokenBalance,
           message: walletAddress ? 'Wallet connected' : 'Wallet removed'
         });
       } catch (error) {
@@ -168,17 +242,37 @@ export default async function handler(req, res) {
         return res.status(200).json({
           success: true,
           user: {
+            // Basic Info
             uid: userId,
-            walletAddress: userData.walletAddress || null,
-            username: userData.username,
-            email: userData.email,
-            profilePicture: userData.profilePicture,
-            twitter: userData.twitter,
+            username: userData.username || 'Anonymous',
+            email: userData.email || null,
+            profilePicture: userData.profilePicture || null,
+            
+            // Twitter Data
             twitterUsername: userData.twitterUsername || null,
             twitterFollowers: userData.twitterFollowers || 0,
+            twitterFollowing: userData.twitterFollowing || 0,
+            twitterTweets: userData.twitterTweets || 0,
             twitterVerified: userData.twitterVerified || false,
+            twitterBio: userData.twitterBio || null,
+            twitterAccountCreatedAt: userData.twitterAccountCreatedAt || null,
+            twitterAccountAgeMonths: userData.twitterAccountAgeMonths || 0,
+            twitterDataFetchedAt: userData.twitterDataFetchedAt || null,
+            
+            // Wallet & Tokens
+            walletAddress: userData.walletAddress || null,
+            tokenBalance: userData.tokenBalance || 0,
+            
+            // Eligibility & Roles
+            eligibleToVote: userData.eligibleToVote !== false,
+            eligibleForCandidacy: userData.eligibleForCandidacy || false,
+            role: userData.role || 'citizen',
             isAdmin: userData.isAdmin || false,
-            tokenBalance: userData.tokenBalance || 0
+            
+            // Timestamps
+            joinedAt: userData.joinedAt || null,
+            lastLogin: userData.lastLogin || null,
+            lastActive: userData.lastActive || null
           }
         });
       } catch (error) {

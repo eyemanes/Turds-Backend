@@ -1,5 +1,18 @@
 import admin from 'firebase-admin';
 
+/**
+ * SECURITY NOTE: Admin status can ONLY be set directly in the Firebase database.
+ * 
+ * To grant admin access:
+ * 1. Go to Firebase Console
+ * 2. Navigate to Firestore Database
+ * 3. Find the 'users' collection
+ * 4. Find the user document by their ID
+ * 5. Add/Update field: isAdmin = true
+ * 
+ * Never expose an API endpoint for setting admin status as it could be exploited.
+ */
+
 // Initialize Firebase Admin only once
 let db = null;
 
@@ -172,34 +185,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // MANAGE USERS - Set admin status
-    if (action === 'set-admin' && req.method === 'POST') {
-      const { userId, isAdmin, adminPassword } = req.body;
-      
-      // Verify admin password
-      const adminPasswordEnv = process.env.ADMIN_PASSWORD;
-      if (!adminPasswordEnv || adminPassword !== adminPasswordEnv) {
-        return res.status(401).json({ 
-          success: false, 
-          message: 'Unauthorized - invalid admin password' 
-        });
-      }
-      
-      if (!userId) {
-        return res.status(400).json({ error: 'User ID required' });
-      }
-      
-      // Update user's admin status
-      await firestore.collection('users').doc(userId).update({
-        isAdmin: isAdmin === true,
-        adminGrantedAt: isAdmin ? admin.firestore.FieldValue.serverTimestamp() : null
-      });
-      
-      return res.status(200).json({ 
-        success: true, 
-        message: `User ${isAdmin ? 'granted' : 'revoked'} admin access`
-      });
-    }
+    // REMOVED set-admin endpoint for security - admin status should only be set directly in database
 
     // GET ALL USERS (for admin panel)
     if (action === 'users' && req.method === 'GET') {
