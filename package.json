@@ -1,16 +1,22 @@
 {
   "name": "turds-nation-backend",
-  "version": "2.0.0",
-  "description": "TURDS Nation Backend API - Secured for Production",
-  "type": "module",
+  "version": "2.1.0",
+  "description": "TURDS Nation Backend API - Optimized Production Version",
+  "main": "server-optimized.js",
   "engines": {
     "node": ">=18.x"
   },
   "scripts": {
-    "build": "echo 'No build needed for Vercel Functions'",
-    "dev": "vercel dev",
-    "start": "node server.js",
-    "test": "echo 'No tests configured yet'"
+    "start": "node server-optimized.js",
+    "dev": "nodemon server-optimized.js",
+    "vercel-dev": "vercel dev",
+    "build": "echo 'No build needed for Node.js'",
+    "test": "jest --coverage",
+    "test:watch": "jest --watch",
+    "lint": "eslint .",
+    "security:check": "npm audit --audit-level=moderate",
+    "security:fix": "npm audit fix",
+    "clean": "rm -rf node_modules package-lock.json && npm install"
   },
   "dependencies": {
     "@solana/web3.js": "^1.87.6",
@@ -26,7 +32,20 @@
   },
   "devDependencies": {
     "@types/node": "^20.10.5",
+    "eslint": "^8.54.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.3",
     "typescript": "^5.3.3",
     "vercel": "^32.0.0"
-  }
+  },
+  "keywords": [
+    "turds",
+    "solana",
+    "api",
+    "backend",
+    "vercel"
+  ],
+  "author": "TURDS Nation",
+  "license": "MIT"
 }

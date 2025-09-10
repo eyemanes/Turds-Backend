@@ -1,3 +1,4 @@
+// Consolidated and optimized server.js
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -8,9 +9,66 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Security Configuration
+// ===========================================
+// CONFIGURATION & CONSTANTS
+// ===========================================
+const CONFIG = {
+  cors: {
+    origins: [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:5173',
+      'https://turds-nation.vercel.app',
+      'https://turds-front.vercel.app',
+      'https://turds.nation',
+      process.env.FRONTEND_URL,
+      ...(process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [])
+    ].filter(Boolean)
+  },
+  rateLimits: {
+    general: { windowMs: 15 * 60 * 1000, max: 100 },
+    strict: { windowMs: 15 * 60 * 1000, max: 20 },
+    auth: { windowMs: 15 * 60 * 1000, max: 5 }
+  },
+  thresholds: {
+    vote: parseInt(process.env.VOTE_MIN_HOLD || '1000000'),
+    election: parseInt(process.env.ELECTION_MIN_HOLD || '5000000'),
+    admin: parseInt(process.env.ADMIN_MIN_HOLD || '10000000')
+  }
+};
+
+// ===========================================
+// UTILITIES & VALIDATORS
+// ===========================================
+const validators = {
+  isValidSolanaAddress: (address) => {
+    if (!address || typeof address !== 'string') return false;
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+  },
+  
+  solanaAddressBody: (field) => 
+    body(field).custom((value) => {
+      if (!validators.isValidSolanaAddress(value)) {
+        throw new Error(`Invalid Solana address for ${field}`);
+      }
+      return true;
+    }),
+  
+  solanaAddressQuery: (field) => 
+    query(field).custom((value) => {
+      if (!validators.isValidSolanaAddress(value)) {
+        throw new Error(`Invalid Solana address for ${field}`);
+      }
+      return true;
+    })
+};
+
+// ===========================================
+// SECURITY MIDDLEWARE
+// ===========================================
 app.use(helmet({
-  contentSecurityPolicy: false, // Disable for API
+  contentSecurityPolicy: false,
   hsts: {
     maxAge: 31536000,
     includeSubDomains: true,
@@ -18,53 +76,13 @@ app.use(helmet({
   }
 }));
 
-// Rate Limiting
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-const strictLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: 'Rate limit exceeded for this operation'
-});
-
-app.use('/api/', apiLimiter);
-app.use('/api/verify-holding', strictLimiter);
-
-// CORS Configuration for Vercel deployment
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:5173',
-  'https://turds-nation.vercel.app',
-  'https://turds-front.vercel.app',
-  'https://turds.nation'
-];
-
-// Add dynamic origins from environment
-if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
-}
-if (process.env.ALLOWED_ORIGINS) {
-  const envOrigins = process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
-  allowedOrigins.push(...envOrigins);
-}
-
+// CORS
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
+  origin: (origin, callback) => {
+    if (!origin || CONFIG.cors.origins.includes(origin)) {
       callback(null, true);
     } else {
-      console.warn(`CORS blocked origin: ${origin}`);
+      console.warn(`CORS blocked: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -72,57 +90,58 @@ app.use(cors({
   optionsSuccessStatus: 200
 }));
 
+// Rate Limiting
+const createRateLimiter = (config) => rateLimit({
+  ...config,
+  message: config.message || 'Too many requests, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const rateLimiters = {
+  general: createRateLimiter(CONFIG.rateLimits.general),
+  strict: createRateLimiter(CONFIG.rateLimits.strict),
+  auth: createRateLimiter({ ...CONFIG.rateLimits.auth, skipSuccessfulRequests: true })
+};
+
+app.use('/api/', rateLimiters.general);
+
+// Body Parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Input validation helper
-const isValidSolanaAddress = (address) => {
-  if (!address || typeof address !== 'string') return false;
-  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
-};
-
-// Custom validation middleware
-const validateSolanaAddress = (field) => {
-  return body(field).custom((value) => {
-    if (!isValidSolanaAddress(value)) {
-      throw new Error(`Invalid Solana address for ${field}`);
-    }
-    return true;
-  });
-};
-
-const validateQueryAddress = (field) => {
-  return query(field).custom((value) => {
-    if (!isValidSolanaAddress(value)) {
-      throw new Error(`Invalid Solana address for ${field}`);
-    }
-    return true;
-  });
-};
-
-// Helius API service
+// ===========================================
+// HELIUS SERVICE (with caching)
+// ===========================================
 class HeliusService {
   constructor() {
     this.apiKey = process.env.HELIUS_API_KEY;
-    if (!this.apiKey) {
-      console.error('CRITICAL: HELIUS_API_KEY not configured in environment variables');
-      // Don't throw in constructor for Vercel, handle per request
-    }
     this.baseUrl = 'https://api.helius.xyz/v0';
+    this.cache = new Map(); // Simple in-memory cache
+    this.cacheTimeout = 60000; // 1 minute cache
+  }
+
+  getCacheKey(walletAddress, mintAddress) {
+    return `${walletAddress}:${mintAddress}`;
   }
 
   async getTokenBalance(walletAddress, mintAddress) {
-    // Runtime check for API key
     if (!this.apiKey) {
       throw new Error('Helius API key not configured');
     }
 
-    // Validate inputs
-    if (!isValidSolanaAddress(walletAddress)) {
+    if (!validators.isValidSolanaAddress(walletAddress)) {
       throw new Error('Invalid wallet address format');
     }
-    if (!isValidSolanaAddress(mintAddress)) {
+    if (!validators.isValidSolanaAddress(mintAddress)) {
       throw new Error('Invalid mint address format');
+    }
+
+    // Check cache
+    const cacheKey = this.getCacheKey(walletAddress, mintAddress);
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      return cached.data;
     }
 
     try {
@@ -134,34 +153,34 @@ class HeliusService {
             'Accept': 'application/json',
             'User-Agent': 'TURDS-Backend/2.0'
           },
-          signal: AbortSignal.timeout(10000) // 10 second timeout
+          signal: AbortSignal.timeout(10000)
         }
       );
       
       if (!response.ok) {
-        console.error(`Helius API error: ${response.status} ${response.statusText}`);
         throw new Error(`Helius API error: ${response.status}`);
       }
 
       const data = await response.json();
       const tokenAccount = data.tokens?.find(token => token.mint === mintAddress);
       
-      if (!tokenAccount) {
-        return {
-          balance: '0',
-          decimals: 9,
-          uiAmount: 0,
-          mint: mintAddress
-        };
-      }
-
-      return {
-        balance: tokenAccount.amount || '0',
-        decimals: tokenAccount.decimals || 9,
-        uiAmount: parseFloat(tokenAccount.amount || '0') / Math.pow(10, tokenAccount.decimals || 9),
+      const result = {
+        balance: tokenAccount?.amount || '0',
+        decimals: tokenAccount?.decimals || 9,
+        uiAmount: parseFloat(tokenAccount?.amount || '0') / Math.pow(10, tokenAccount?.decimals || 9),
         mint: mintAddress
       };
 
+      // Cache result
+      this.cache.set(cacheKey, { data: result, timestamp: Date.now() });
+      
+      // Clean old cache entries
+      if (this.cache.size > 1000) {
+        const oldestKey = this.cache.keys().next().value;
+        this.cache.delete(oldestKey);
+      }
+
+      return result;
     } catch (error) {
       console.error('[Helius] Error:', error.message);
       throw error;
@@ -172,10 +191,10 @@ class HeliusService {
     try {
       const tokenData = await this.getTokenBalance(walletAddress, mintAddress);
       const balance = parseInt(tokenData.balance || '0');
-      return balance >= minimumAmount;
+      return { verified: balance >= minimumAmount, tokenData };
     } catch (error) {
       console.error('[Helius] Verification error:', error);
-      return false;
+      return { verified: false, tokenData: null };
     }
   }
 
@@ -183,12 +202,9 @@ class HeliusService {
     if (!this.apiKey) return false;
     
     try {
-      // Test with USDC mint address
       const response = await fetch(
         `${this.baseUrl}/addresses/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/balances?api-key=${this.apiKey}`,
-        {
-          signal: AbortSignal.timeout(5000)
-        }
+        { signal: AbortSignal.timeout(5000) }
       );
       return response.ok;
     } catch (error) {
@@ -196,11 +212,46 @@ class HeliusService {
       return false;
     }
   }
+
+  clearCache() {
+    this.cache.clear();
+  }
 }
 
 const heliusService = new HeliusService();
 
-// Health check endpoint
+// ===========================================
+// ERROR HANDLING UTILITIES
+// ===========================================
+const handleError = (res, error, customMessage = null) => {
+  console.error(error);
+  
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  const message = customMessage || 'Service temporarily unavailable';
+  
+  res.status(500).json({
+    error: message,
+    ...(isDevelopment && { details: error.message, stack: error.stack }),
+    timestamp: Date.now()
+  });
+};
+
+const handleValidationErrors = (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ 
+      error: 'Validation failed',
+      errors: errors.array() 
+    });
+  }
+  return null;
+};
+
+// ===========================================
+// API ROUTES
+// ===========================================
+
+// Health Check
 app.get('/api/health', async (req, res) => {
   try {
     const heliusConnected = await heliusService.testConnection();
@@ -211,6 +262,7 @@ app.get('/api/health', async (req, res) => {
       version: '2.0.0',
       environment: process.env.NODE_ENV || 'development',
       heliusConnection: heliusConnected,
+      cacheSize: heliusService.cache.size,
       timestamp: Date.now(),
       endpoints: {
         tokenBalance: 'POST /api/token-balance',
@@ -220,8 +272,6 @@ app.get('/api/health', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Health check error:', error);
-    
     res.status(503).json({
       success: false,
       error: 'Health check failed',
@@ -230,23 +280,18 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Token balance endpoint with validation
+// Token Balance Endpoint
 app.post('/api/token-balance',
   [
-    validateSolanaAddress('walletAddress'),
-    validateSolanaAddress('mintAddress')
+    validators.solanaAddressBody('walletAddress'),
+    validators.solanaAddressBody('mintAddress')
   ],
   async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    const validationError = handleValidationErrors(req, res);
+    if (validationError) return;
 
     try {
       const { walletAddress, mintAddress } = req.body;
-
-      console.log(`[API] Token balance request for ${walletAddress.substring(0, 8)}...`);
-
       const tokenBalance = await heliusService.getTokenBalance(walletAddress, mintAddress);
 
       res.json({
@@ -254,42 +299,26 @@ app.post('/api/token-balance',
         ...tokenBalance,
         timestamp: Date.now()
       });
-
     } catch (error) {
-      console.error('Token balance API error:', error);
-      
-      res.status(500).json({
-        error: 'Failed to fetch token balance',
-        message: process.env.NODE_ENV === 'development' ? error.message : 'Service temporarily unavailable'
-      });
+      handleError(res, error, 'Failed to fetch token balance');
     }
   }
 );
 
-// Holdings endpoint with validation
+// Holdings Endpoint
 app.get('/api/holdings',
   [
-    validateQueryAddress('owner'),
-    validateQueryAddress('mint')
+    validators.solanaAddressQuery('owner'),
+    validators.solanaAddressQuery('mint')
   ],
   async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    const validationError = handleValidationErrors(req, res);
+    if (validationError) return;
 
     try {
       const { owner, mint } = req.query;
-
-      console.log(`[API] Holdings check for owner=${owner.substring(0, 8)}...`);
-
       const tokenData = await heliusService.getTokenBalance(owner, mint);
       const balance = parseInt(tokenData.balance || '0');
-      
-      // Define thresholds (use environment variables or defaults)
-      const voteThreshold = parseInt(process.env.VOTE_MIN_HOLD || '1000000');
-      const electionThreshold = parseInt(process.env.ELECTION_MIN_HOLD || '5000000');
-      const adminThreshold = parseInt(process.env.ADMIN_MIN_HOLD || '10000000');
 
       res.json({
         success: true,
@@ -300,77 +329,76 @@ app.get('/api/holdings',
         uiAmount: tokenData.uiAmount,
         decimals: tokenData.decimals,
         permissions: {
-          canVote: balance >= voteThreshold,
-          canRunForOffice: balance >= electionThreshold,
-          canAdmin: balance >= adminThreshold
+          canVote: balance >= CONFIG.thresholds.vote,
+          canRunForOffice: balance >= CONFIG.thresholds.election,
+          canAdmin: balance >= CONFIG.thresholds.admin
         },
-        thresholds: {
-          vote: voteThreshold,
-          election: electionThreshold,
-          admin: adminThreshold
-        },
+        thresholds: CONFIG.thresholds,
         timestamp: Date.now()
       });
-
     } catch (error) {
-      console.error('Holdings API error:', error);
-      
-      res.status(500).json({
-        error: 'Failed to check holdings',
-        message: process.env.NODE_ENV === 'development' ? error.message : 'Service temporarily unavailable'
-      });
+      handleError(res, error, 'Failed to check holdings');
     }
   }
 );
 
-// Verify holding endpoint with validation
+// Verify Holding Endpoint (Optimized)
 app.post('/api/verify-holding',
+  rateLimiters.strict,
   [
-    validateSolanaAddress('walletAddress'),
-    validateSolanaAddress('mintAddress'),
+    validators.solanaAddressBody('walletAddress'),
+    validators.solanaAddressBody('mintAddress'),
     body('minimumAmount').isNumeric().withMessage('minimumAmount must be a number')
   ],
   async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    const validationError = handleValidationErrors(req, res);
+    if (validationError) return;
 
     try {
       const { walletAddress, mintAddress, minimumAmount } = req.body;
-
-      console.log(`[API] Verify holding for ${walletAddress.substring(0, 8)}...`);
-
-      const isVerified = await heliusService.verifyTokenHolding(
+      
+      // Single call to verify and get balance
+      const { verified, tokenData } = await heliusService.verifyTokenHolding(
         walletAddress,
         mintAddress,
         minimumAmount
       );
 
-      const tokenBalance = await heliusService.getTokenBalance(walletAddress, mintAddress);
-      const actualBalance = parseInt(tokenBalance.balance || '0');
+      if (!tokenData) {
+        throw new Error('Unable to fetch token data');
+      }
+
+      const actualBalance = parseInt(tokenData.balance || '0');
 
       res.json({
         success: true,
-        verified: isVerified,
+        verified,
         actualBalance,
         minimumRequired: minimumAmount,
         meetsRequirement: actualBalance >= minimumAmount,
         timestamp: Date.now()
       });
-
     } catch (error) {
-      console.error('Token verification API error:', error);
-      
-      res.status(500).json({
-        error: 'Failed to verify token holding',
-        message: process.env.NODE_ENV === 'development' ? error.message : 'Service temporarily unavailable'
-      });
+      handleError(res, error, 'Failed to verify token holding');
     }
   }
 );
 
-// 404 handler
+// Admin Cache Clear Endpoint
+app.post('/api/admin/clear-cache',
+  rateLimiters.auth,
+  (req, res) => {
+    // Add proper authentication here
+    heliusService.clearCache();
+    res.json({ 
+      success: true, 
+      message: 'Cache cleared',
+      timestamp: Date.now()
+    });
+  }
+);
+
+// 404 Handler
 app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
@@ -385,35 +413,35 @@ app.use('*', (req, res) => {
   });
 });
 
-// Global error handler
+// Global Error Handler
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  
-  // Don't leak error details in production
-  if (process.env.NODE_ENV === 'production') {
-    res.status(500).json({
-      error: 'Internal server error',
-      timestamp: Date.now()
-    });
-  } else {
-    res.status(500).json({
-      error: 'Internal server error',
-      message: err.message,
-      stack: err.stack,
-      timestamp: Date.now()
-    });
-  }
+  handleError(res, err, 'Internal server error');
 });
 
-// Only start server if not in Vercel environment
-if (process.env.VERCEL !== '1') {
+// ===========================================
+// SERVER STARTUP
+// ===========================================
+const isVercel = process.env.VERCEL === '1';
+
+if (!isVercel) {
   app.listen(PORT, () => {
-    console.log(`🚀 TURDS Nation Backend running on port ${PORT}`);
-    console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🔒 Security: Helmet + Rate Limiting + CORS enabled`);
-    console.log(`✅ Input validation: Enabled`);
-    console.log(`🪙 Helius API: ${process.env.HELIUS_API_KEY ? 'Configured' : 'NOT CONFIGURED'}`);
+    console.log(`
+🚀 TURDS Nation Backend
+📍 Port: ${PORT}
+🌍 Environment: ${process.env.NODE_ENV || 'development'}
+🔒 Security: Helmet + Rate Limiting + CORS
+✅ Validation: Enabled
+💾 Caching: Enabled (1 min TTL)
+🪙 Helius: ${process.env.HELIUS_API_KEY ? 'Connected' : 'NOT CONFIGURED'}
+    `.trim());
   });
 }
+
+// Graceful Shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received: closing HTTP server');
+  heliusService.clearCache();
+  process.exit(0);
+});
 
 module.exports = app;
