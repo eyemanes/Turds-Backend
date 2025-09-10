@@ -1,8 +1,42 @@
 import admin from 'firebase-admin';
 
-const firestore = admin.firestore();
+// Initialize Firebase Admin
+let db = null;
+
+function initializeFirebase() {
+  if (db) return db;
+  
+  try {
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    
+    if (!privateKey || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PROJECT_ID) {
+      console.error('Missing Firebase credentials');
+      return null;
+    }
+
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey: privateKey,
+        })
+      });
+    }
+    
+    db = admin.firestore();
+    return db;
+  } catch (error) {
+    console.error('Firebase initialization error:', error);
+    return null;
+  }
+}
 
 export default async function handler(req, res) {
+  const firestore = initializeFirebase();
+  if (!firestore) {
+    return res.status(500).json({ error: 'Database connection failed' });
+  }
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
