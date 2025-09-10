@@ -21,6 +21,7 @@ const CONFIG = {
       'http://127.0.0.1:5173',
       'https://turds-nation.vercel.app',
       'https://turds-front.vercel.app',
+      'https://turds-front-w625.vercel.app',
       'https://turds.nation',
       process.env.FRONTEND_URL,
       ...(process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [])
