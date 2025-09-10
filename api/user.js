@@ -54,6 +54,12 @@ export default async function handler(req, res) {
     if (action === 'register') {
       const userData = req.body;
       
+      console.log('=== REGISTRATION DEBUG ===');
+      console.log('Received userData:', JSON.stringify(userData, null, 2));
+      console.log('twitterUsername value:', userData.twitterUsername);
+      console.log('twitterUsername type:', typeof userData.twitterUsername);
+      console.log('twitterUsername truthy:', !!userData.twitterUsername);
+      
       if (!userData.uid) {
         return res.status(400).json({ error: 'User ID required' });
       }
@@ -100,10 +106,14 @@ export default async function handler(req, res) {
       await firestore.collection('users').doc(userData.uid).set(userRecord, { merge: true });
 
       // ALWAYS fetch Twitter data on registration if username provided
-      if (userData.twitterUsername) {
+      const twitterUsername = userData.twitterUsername || userData.username;
+      console.log('Twitter fetch check - twitterUsername:', userData.twitterUsername, 'username:', userData.username, 'final:', twitterUsername);
+      console.log('All userData fields:', Object.keys(userData));
+      
+      if (twitterUsername && twitterUsername !== 'Anonymous' && twitterUsername !== 'null' && twitterUsername !== 'undefined') {
+        console.log('Starting Twitter fetch for:', twitterUsername);
         try {
-          console.log('Fetching Twitter data for:', userData.twitterUsername);
-          const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${userData.twitterUsername}`, {
+          const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${twitterUsername}`, {
             method: 'GET',
             headers: {
               'x-rapidapi-key': process.env.RAPIDAPI_KEY || '20fd5100f3msh8ad5102149a060ep18b8adjsn04eed04ad53d',
@@ -111,9 +121,11 @@ export default async function handler(req, res) {
             }
           });
 
+          console.log('Twitter API response status:', twitterResponse.status);
+
           if (twitterResponse.ok) {
             const twitterData = await twitterResponse.json();
-            console.log('Twitter API response received');
+            console.log('Twitter API response received for', twitterUsername);
             
             let followerCount = 0;
             let followingCount = 0;
@@ -163,12 +175,25 @@ export default async function handler(req, res) {
             
             // Update the userRecord for response to include Twitter data
             Object.assign(userRecord, twitterUpdate);
-            console.log(`Twitter data updated: ${followerCount} followers, eligible: ${eligibleForCandidacy}`);
+            console.log(`Twitter data updated for ${twitterUsername}: ${followerCount} followers, eligible: ${eligibleForCandidacy}`);
+          } else {
+            console.error('Twitter API error - Status:', twitterResponse.status);
+            const errorText = await twitterResponse.text();
+            console.error('Twitter API error response:', errorText);
           }
         } catch (error) {
           console.error('Error fetching Twitter data during registration:', error);
           // Don't fail registration if Twitter fetch fails
         }
+      } else {
+        console.log('SKIPPING Twitter fetch - Reason:', {
+          twitterUsername: userData.twitterUsername,
+          username: userData.username,
+          final: twitterUsername,
+          isAnonymous: twitterUsername === 'Anonymous',
+          isNull: twitterUsername === 'null',
+          isUndefined: twitterUsername === 'undefined'
+        });
       }
       
       // Re-fetch the complete user record after all updates
