@@ -139,16 +139,31 @@ export default async function handler(req, res) {
             let accountCreatedAt = null;
             
             // Extract data from Twitter API response
-            if (twitterData.result) {
-              const userResult = twitterData.result.result || twitterData.result;
-              if (userResult.legacy) {
+            console.log('Twitter API response structure:', JSON.stringify(twitterData, null, 2));
+            
+            if (twitterData.result && twitterData.result.data && twitterData.result.data.user) {
+              const userResult = twitterData.result.data.user.result;
+              console.log('Extracted user result:', JSON.stringify(userResult, null, 2));
+              
+              if (userResult && userResult.legacy) {
                 followerCount = userResult.legacy.followers_count || 0;
                 followingCount = userResult.legacy.friends_count || 0;
                 tweetsCount = userResult.legacy.statuses_count || 0;
-                verified = userResult.legacy.verified || false;
+                verified = userResult.verification?.verified || userResult.legacy.verified || false;
                 bio = userResult.legacy.description || '';
-                accountCreatedAt = userResult.legacy.created_at || null;
+                accountCreatedAt = userResult.core?.created_at || userResult.legacy.created_at || null;
+                
+                console.log('Extracted data:', {
+                  followerCount,
+                  followingCount,
+                  tweetsCount,
+                  verified,
+                  bio,
+                  accountCreatedAt
+                });
               }
+            } else {
+              console.log('Twitter API response structure not as expected:', Object.keys(twitterData));
             }
 
             // Calculate account age in months
@@ -404,23 +419,37 @@ export default async function handler(req, res) {
         // Extract follower count from the response
         let followerCount = 0;
         let verified = false;
+        let followingCount = 0;
+        let tweetsCount = 0;
+        let bio = '';
+        let accountCreatedAt = null;
         
-        // Handle different response structures
-        if (twitterData.result) {
-          const userResult = twitterData.result.result || twitterData.result;
-          if (userResult.legacy) {
+        console.log('Refresh Twitter API response structure:', JSON.stringify(twitterData, null, 2));
+        
+        // Handle the correct response structure
+        if (twitterData.result && twitterData.result.data && twitterData.result.data.user) {
+          const userResult = twitterData.result.data.user.result;
+          console.log('Refresh extracted user result:', JSON.stringify(userResult, null, 2));
+          
+          if (userResult && userResult.legacy) {
             followerCount = userResult.legacy.followers_count || 0;
-            verified = userResult.legacy.verified || false;
-          } else if (userResult.followers_count !== undefined) {
-            followerCount = userResult.followers_count;
-            verified = userResult.verified || false;
+            followingCount = userResult.legacy.friends_count || 0;
+            tweetsCount = userResult.legacy.statuses_count || 0;
+            verified = userResult.verification?.verified || userResult.legacy.verified || false;
+            bio = userResult.legacy.description || '';
+            accountCreatedAt = userResult.core?.created_at || userResult.legacy.created_at || null;
+            
+            console.log('Refresh extracted data:', {
+              followerCount,
+              followingCount,
+              tweetsCount,
+              verified,
+              bio,
+              accountCreatedAt
+            });
           }
-        } else if (twitterData.followers_count !== undefined) {
-          followerCount = twitterData.followers_count;
-          verified = twitterData.verified || false;
-        } else if (twitterData.data) {
-          followerCount = twitterData.data.public_metrics?.followers_count || 0;
-          verified = twitterData.data.verified || false;
+        } else {
+          console.log('Refresh Twitter API response structure not as expected:', Object.keys(twitterData));
         }
 
         console.log(`Twitter data for @${username}: ${followerCount} followers, verified: ${verified}`);
@@ -430,12 +459,39 @@ export default async function handler(req, res) {
         const currentTokenBalance = userDoc.data()?.tokenBalance || 0;
         const eligibleForCandidacy = followerCount >= 500 || currentTokenBalance >= 1000000;
 
-        // Update user in database with Twitter data
+        // Calculate account age in months
+        let accountAgeMonths = 0;
+        if (accountCreatedAt) {
+          const createdDate = new Date(accountCreatedAt);
+          const now = new Date();
+          accountAgeMonths = Math.floor((now - createdDate) / (1000 * 60 * 60 * 24 * 30));
+        }
+
+        // Store detailed Twitter data in separate collection
+        const twitterDataToStore = {
+          userId: userId,
+          username: username,
+          followers: followerCount,
+          following: followingCount,
+          tweets: tweetsCount,
+          verified: verified,
+          bio: bio,
+          accountCreatedAt: accountCreatedAt,
+          accountAgeMonths: accountAgeMonths,
+          dataFetchedAt: admin.firestore.FieldValue.serverTimestamp(),
+          eligibleForCandidacy: eligibleForCandidacy,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+
+        // Store in twitter_data collection
+        await firestore.collection('twitter_data').doc(userId).set(twitterDataToStore, { merge: true });
+
+        // Update user in database with basic Twitter data
         await firestore.collection('users').doc(userId).update({
           twitterUsername: username,
           twitterFollowers: followerCount,
           twitterVerified: verified,
-          twitterLastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+          twitterDataFetchedAt: admin.firestore.FieldValue.serverTimestamp(),
           eligibleForCandidacy: eligibleForCandidacy
         });
 
