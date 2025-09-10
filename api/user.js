@@ -58,16 +58,62 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'User ID required' });
       }
 
+      // Check if user exists first
+      const existingUser = await firestore.collection('users').doc(userData.uid).get();
+      const existingData = existingUser.exists ? existingUser.data() : {};
+
       const userRecord = {
         uid: userData.uid,
-        username: userData.username || 'Anonymous',
-        email: userData.email || null,
-        profilePicture: userData.profilePicture || null,
+        username: userData.username || existingData.username || 'Anonymous',
+        email: userData.email || existingData.email || null,
+        profilePicture: userData.profilePicture || existingData.profilePicture || null,
+        twitterUsername: userData.twitterUsername || existingData.twitterUsername || null,
+        twitterFollowers: existingData.twitterFollowers || 0,
+        twitterVerified: existingData.twitterVerified || false,
+        walletAddress: existingData.walletAddress || null,
+        isAdmin: existingData.isAdmin || false,
         lastLogin: admin.firestore.FieldValue.serverTimestamp(),
         lastActive: admin.firestore.FieldValue.serverTimestamp(),
       };
 
       await firestore.collection('users').doc(userData.uid).set(userRecord, { merge: true });
+
+      // If Twitter username provided, fetch Twitter data
+      if (userData.twitterUsername && !existingData.twitterFollowers) {
+        try {
+          const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${userData.twitterUsername}`, {
+            method: 'GET',
+            headers: {
+              'x-rapidapi-key': process.env.RAPIDAPI_KEY || '20fd5100f3msh8ad5102149a060ep18b8adjsn04eed04ad53d',
+              'x-rapidapi-host': 'twitter241.p.rapidapi.com'
+            }
+          });
+
+          if (twitterResponse.ok) {
+            const twitterData = await twitterResponse.json();
+            let followerCount = 0;
+            let verified = false;
+            
+            if (twitterData.result) {
+              const userResult = twitterData.result.result || twitterData.result;
+              if (userResult.legacy) {
+                followerCount = userResult.legacy.followers_count || 0;
+                verified = userResult.legacy.verified || false;
+              }
+            }
+
+            await firestore.collection('users').doc(userData.uid).update({
+              twitterFollowers: followerCount,
+              twitterVerified: verified
+            });
+
+            userRecord.twitterFollowers = followerCount;
+            userRecord.twitterVerified = verified;
+          }
+        } catch (error) {
+          console.error('Error fetching Twitter data during registration:', error);
+        }
+      }
 
       return res.status(200).json({ 
         success: true, 
@@ -121,14 +167,19 @@ export default async function handler(req, res) {
         const userData = userDoc.data();
         return res.status(200).json({
           success: true,
-          uid: userId,
-          walletAddress: userData.walletAddress || null,
-          username: userData.username,
-          email: userData.email,
-          profilePicture: userData.profilePicture,
-          twitter: userData.twitter,
-          isAdmin: userData.isAdmin || false,
-          tokenBalance: userData.tokenBalance || 0
+          user: {
+            uid: userId,
+            walletAddress: userData.walletAddress || null,
+            username: userData.username,
+            email: userData.email,
+            profilePicture: userData.profilePicture,
+            twitter: userData.twitter,
+            twitterUsername: userData.twitterUsername || null,
+            twitterFollowers: userData.twitterFollowers || 0,
+            twitterVerified: userData.twitterVerified || false,
+            isAdmin: userData.isAdmin || false,
+            tokenBalance: userData.tokenBalance || 0
+          }
         });
       } catch (error) {
         console.error('Error fetching user:', error);
@@ -136,7 +187,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // REFRESH TWITTER DATA (simplified for now)
+    // REFRESH TWITTER DATA
     if (action === 'refresh-twitter') {
       const { userId, username } = req.body;
       
@@ -144,12 +195,73 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Missing userId or username' });
       }
 
-      // For now, just return success
-      // You can add actual Twitter API call here if needed
-      return res.status(200).json({ 
-        success: true,
-        message: 'Twitter data refresh not implemented yet'
-      });
+      try {
+        // Call Twitter API to get user data
+        const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${username}`, {
+          method: 'GET',
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY || '20fd5100f3msh8ad5102149a060ep18b8adjsn04eed04ad53d',
+            'x-rapidapi-host': 'twitter241.p.rapidapi.com'
+          }
+        });
+
+        if (!twitterResponse.ok) {
+          console.error('Twitter API error:', twitterResponse.status);
+          return res.status(500).json({ 
+            success: false,
+            message: 'Failed to fetch Twitter data'
+          });
+        }
+
+        const twitterData = await twitterResponse.json();
+        console.log('Twitter API response:', twitterData);
+
+        // Extract follower count from the response
+        let followerCount = 0;
+        let verified = false;
+        
+        // Handle different response structures
+        if (twitterData.result) {
+          const userResult = twitterData.result.result || twitterData.result;
+          if (userResult.legacy) {
+            followerCount = userResult.legacy.followers_count || 0;
+            verified = userResult.legacy.verified || false;
+          } else if (userResult.followers_count !== undefined) {
+            followerCount = userResult.followers_count;
+            verified = userResult.verified || false;
+          }
+        } else if (twitterData.followers_count !== undefined) {
+          followerCount = twitterData.followers_count;
+          verified = twitterData.verified || false;
+        } else if (twitterData.data) {
+          followerCount = twitterData.data.public_metrics?.followers_count || 0;
+          verified = twitterData.data.verified || false;
+        }
+
+        console.log(`Twitter data for @${username}: ${followerCount} followers, verified: ${verified}`);
+
+        // Update user in database with Twitter data
+        await firestore.collection('users').doc(userId).update({
+          twitterUsername: username,
+          twitterFollowers: followerCount,
+          twitterVerified: verified,
+          twitterLastUpdated: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        return res.status(200).json({ 
+          success: true,
+          message: 'Twitter data refreshed successfully',
+          followers: followerCount,
+          verified: verified
+        });
+      } catch (error) {
+        console.error('Error refreshing Twitter data:', error);
+        return res.status(500).json({ 
+          success: false,
+          message: 'Failed to refresh Twitter data',
+          error: error.message
+        });
+      }
     }
 
     // GET USER (original endpoint support)
