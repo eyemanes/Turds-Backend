@@ -126,6 +126,13 @@ export default async function handler(req, res) {
       const onlineAdmins = [];
       onlineAdminsSnapshot.forEach(doc => {
         const data = doc.data();
+        
+        // Check if admin is in stealth mode (has stealthMode field set to true)
+        // If stealthMode is true, exclude from online list
+        if (data.stealthMode === true) {
+          return; // Skip this admin - they're in stealth mode
+        }
+        
         onlineAdmins.push({
           id: doc.id,
           username: data.username || 'Unknown',

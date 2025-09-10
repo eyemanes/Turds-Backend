@@ -404,6 +404,30 @@ export default async function handler(req, res) {
     
     // GET USER DATA (removed duplicate - using the one above)
 
+    // UPDATE STEALTH MODE
+    if (action === 'update-stealth') {
+      const { userId, stealthMode } = req.body;
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID required' });
+      }
+
+      try {
+        await firestore.collection('users').doc(userId).update({
+          stealthMode: stealthMode === true,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        return res.status(200).json({
+          success: true,
+          message: 'Stealth mode updated successfully'
+        });
+      } catch (error) {
+        console.error('Error updating stealth mode:', error);
+        return res.status(500).json({ error: 'Failed to update stealth mode' });
+      }
+    }
+
     // REFRESH TWITTER DATA
     if (action === 'refresh-twitter') {
       const { userId, username } = req.body;
