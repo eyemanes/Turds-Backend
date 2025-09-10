@@ -238,6 +238,8 @@ export default async function handler(req, res) {
       console.log('=== GET USER DEBUG ===');
       console.log('Requested userId:', userId);
       console.log('Query params:', req.query);
+      console.log('Request method:', req.method);
+      console.log('Request URL:', req.url);
       
       if (!userId) {
         return res.status(400).json({ error: 'User ID required' });
@@ -251,9 +253,19 @@ export default async function handler(req, res) {
         
         if (!userDoc.exists) {
           console.log('User not found in database for ID:', userId);
-          return res.status(404).json({ 
-            success: false, 
-            message: 'User not found' 
+          // Return empty user data instead of 404 to prevent frontend errors
+          return res.status(200).json({
+            success: true,
+            user: {
+              uid: userId,
+              username: 'Unknown',
+              twitterFollowers: 0,
+              twitterVerified: false,
+              tokenBalance: 0,
+              eligibleForCandidacy: false,
+              walletAddress: null
+            },
+            message: 'User not found, returning default data'
           });
         }
         
@@ -490,6 +502,59 @@ export default async function handler(req, res) {
         success: true, 
         message: 'User updated successfully' 
       });
+    }
+
+    // Fallback for direct GET requests without action parameter
+    if (req.method === 'GET' && !action) {
+      const userId = req.query.userId || req.query.uid;
+      
+      console.log('=== FALLBACK GET USER ===');
+      console.log('Requested userId:', userId);
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID required' });
+      }
+      
+      try {
+        const userDoc = await firestore.collection('users').doc(userId).get();
+        
+        if (!userDoc.exists) {
+          return res.status(200).json({
+            success: true,
+            user: {
+              uid: userId,
+              username: 'Unknown',
+              twitterFollowers: 0,
+              twitterVerified: false,
+              tokenBalance: 0,
+              eligibleForCandidacy: false,
+              walletAddress: null
+            },
+            message: 'User not found, returning default data'
+          });
+        }
+        
+        const userData = userDoc.data();
+        return res.status(200).json({
+          success: true,
+          user: {
+            uid: userId,
+            username: userData.username || 'Anonymous',
+            email: userData.email || null,
+            profilePicture: userData.profilePicture || null,
+            twitterUsername: userData.twitterUsername || null,
+            twitterFollowers: userData.twitterFollowers || 0,
+            twitterVerified: userData.twitterVerified || false,
+            walletAddress: userData.walletAddress || null,
+            tokenBalance: userData.tokenBalance || 0,
+            eligibleForCandidacy: userData.eligibleForCandidacy || false,
+            isAdmin: userData.isAdmin || false
+          }
+        });
+      } catch (error) {
+        console.error('Fallback user fetch error:', error);
+        return res.status(500).json({ error: 'Failed to fetch user' });
+      }
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
