@@ -66,6 +66,20 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const candidateData = req.body;
       
+      // Validate position if provided
+      const validPositions = [
+        'president', 'prime_minister', 'secretary',
+        'minister_finance', 'minister_creativity', 'minister_raid_corps',
+        'minister_development', 'minister_citizens', 'minister_justice'
+      ];
+      
+      if (candidateData.position && !validPositions.includes(candidateData.position)) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Invalid position specified' 
+        });
+      }
+      
       // Check if user meets follower requirement
       if (candidateData.userId) {
         const userDoc = await firestore.collection('users').doc(candidateData.userId).get();
@@ -78,9 +92,9 @@ export default async function handler(req, res) {
             eligible: userData.eligibleForCandidacy
           });
           
-          // Check eligibility requirements (500+ followers AND 1M+ tokens)
+          // Check eligibility requirements (500+ followers AND 50K+ tokens for testing)
           const hasEnoughFollowers = userData.twitterFollowers && userData.twitterFollowers >= 500;
-          const hasEnoughTokens = userData.tokenBalance && userData.tokenBalance >= 1000000;
+          const hasEnoughTokens = userData.tokenBalance && userData.tokenBalance >= 50000; // Reduced to 50K for testing
           
           if (!hasEnoughFollowers) {
             console.log('Follower requirement not met:', userData.twitterFollowers);
@@ -94,9 +108,9 @@ export default async function handler(req, res) {
           if (!hasEnoughTokens) {
             console.log('Token requirement not met:', userData.tokenBalance);
             return res.status(403).json({ 
-              error: 'Minimum 1,000,000 TURDS tokens required to run for office',
+              error: 'Minimum 50,000 TURDS tokens required to run for office',
               currentTokens: userData.tokenBalance || 0,
-              required: 1000000
+              required: 50000
             });
           }
         } else {
@@ -125,6 +139,11 @@ export default async function handler(req, res) {
       const docData = {
         ...candidateData,
         ...twitterData,
+        position: candidateData.position || 'president', // Default to president
+        electionPhase: candidateData.position && 
+          ['president', 'prime_minister', 'secretary'].includes(candidateData.position) 
+          ? 'phase_one' 
+          : 'phase_two',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         isActive: true,
