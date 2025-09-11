@@ -1,13 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { solanaService } from '../lib/solana.js'
 import { firebaseService } from '../lib/firebase.js'
+import { setSecureCorsHeaders } from '../lib/cors.js'
 
-// CORS headers
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-}
 
 interface VerifyRequest {
   walletAddress: string
@@ -17,15 +12,10 @@ interface VerifyRequest {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).json({}).end()
+  // Use secure CORS middleware
+  if (setSecureCorsHeaders(req, res)) {
+    return; // Preflight request handled
   }
-
-  // Set CORS headers
-  Object.entries(corsHeaders).forEach(([key, value]) => {
-    res.setHeader(key, value)
-  })
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })

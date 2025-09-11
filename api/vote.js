@@ -1,4 +1,5 @@
 import admin from 'firebase-admin';
+import { setSecureCorsHeaders } from '../lib/cors.js';
 
 // Initialize Firebase Admin
 if (!admin.apps.length) {
@@ -22,14 +23,9 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 export default async function handler(req, res) {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Use secure CORS middleware
+  if (setSecureCorsHeaders(req, res)) {
+    return; // Preflight request handled
   }
 
   try {

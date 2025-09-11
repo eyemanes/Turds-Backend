@@ -1,4 +1,5 @@
 import admin from 'firebase-admin';
+import { setSecureCorsHeaders } from '../lib/cors.js';
 
 // Initialize Firebase Admin
 let db = null;
@@ -33,14 +34,9 @@ function initializeFirebase() {
 }
 
 export default async function handler(req, res) {
-  // Set CORS headers first
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Use secure CORS middleware
+  if (setSecureCorsHeaders(req, res)) {
+    return; // Preflight request handled
   }
 
   const firestore = initializeFirebase();

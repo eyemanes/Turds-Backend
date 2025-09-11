@@ -1,4 +1,5 @@
 import admin from 'firebase-admin';
+import { setSecureCorsHeaders } from '../lib/cors.js';
 
 /**
  * SECURITY NOTE: Admin status can ONLY be set directly in the Firebase database.
@@ -51,24 +52,9 @@ export default async function handler(req, res) {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   
-  // CORS with specific origins
-  const allowedOrigins = [
-    process.env.FRONTEND_URL,
-    'https://turds-nation.vercel.app',
-    'http://localhost:5173'
-  ].filter(Boolean);
-  
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Use secure CORS middleware
+  if (setSecureCorsHeaders(req, res)) {
+    return; // Preflight request handled
   }
 
   const firestore = initializeFirebase();

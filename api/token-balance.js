@@ -1,30 +1,11 @@
 // Token balance endpoint for Solana tokens using Helius RPC
 import admin from 'firebase-admin';
+import { setSecureCorsHeaders } from '../lib/cors.js';
 
 export default async function handler(req, res) {
-  // Set comprehensive CORS headers
-  const allowedOrigins = [
-    'https://turds-front-w625.vercel.app',
-    'https://turds-nation.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000'
-  ];
-  
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Use secure CORS middleware
+  if (setSecureCorsHeaders(req, res)) {
+    return; // Preflight request handled
   }
 
   // Accept both GET and POST
@@ -43,7 +24,15 @@ export default async function handler(req, res) {
     }
     
     // Use the TURDS mint address from env or passed value
-    const tokenMint = mintAddress || process.env.TURDS_MINT_ADDRESS || '5tiJnwdL5WrCFa7K4eKHRjRtqgX9z2hmbn3LACNApump';
+    const tokenMint = mintAddress || process.env.TURDS_MINT_ADDRESS;
+
+    // Validate required environment variables
+    if (!tokenMint) {
+      return res.status(500).json({
+        error: 'Token mint address not configured',
+        message: 'TURDS_MINT_ADDRESS environment variable is required'
+      });
+    }
 
     console.log('Token balance request:', { 
       walletAddress, 

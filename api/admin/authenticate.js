@@ -1,5 +1,8 @@
 import crypto from 'crypto';
 import admin from 'firebase-admin';
+import { setSecureCorsHeaders } from '../../lib/cors.js';
+import { getRequiredEnvVar } from '../../lib/env-validation.js';
+import logger from '../../lib/logger.js';
 
 // Rate limiting storage
 const loginAttempts = new Map();
@@ -13,18 +16,15 @@ function initializeFirebase() {
   if (db) return db;
   
   try {
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-    
-    if (!privateKey || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PROJECT_ID) {
-      console.error('Missing Firebase credentials');
-      return null;
-    }
+    const privateKey = getRequiredEnvVar('FIREBASE_PRIVATE_KEY').replace(/\\n/g, '\n');
+    const clientEmail = getRequiredEnvVar('FIREBASE_CLIENT_EMAIL');
+    const projectId = getRequiredEnvVar('FIREBASE_PROJECT_ID');
 
     if (!admin.apps.length) {
       admin.initializeApp({
         credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          projectId: projectId,
+          clientEmail: clientEmail,
           privateKey: privateKey,
         })
       });
@@ -33,7 +33,7 @@ function initializeFirebase() {
     db = admin.firestore();
     return db;
   } catch (error) {
-    console.error('Firebase initialization error:', error);
+    logger.logError(error, 'Firebase initialization');
     return null;
   }
 }
@@ -84,9 +84,11 @@ function updateLoginAttempts(ip, success = false) {
 
 // Simple password hashing for Vercel (no bcrypt needed)
 function hashPassword(password) {
+  const jwtSecret = getRequiredEnvVar('JWT_SECRET');
+  
   return crypto
     .createHash('sha256')
-    .update(password + (process.env.JWT_SECRET || 'turds-secret-2024'))
+    .update(password + jwtSecret)
     .digest('hex');
 }
 
@@ -103,31 +105,17 @@ function generateToken(userId, role = 'admin') {
 }
 
 export default async function handler(req, res) {
+  // Log request for audit trail
+  logger.logRequest(req, 'Admin authentication attempt');
+  
   // Security headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   
-  // CORS with specific origin
-  const allowedOrigins = [
-    process.env.FRONTEND_URL,
-    'https://turds-nation.vercel.app',
-    'https://turds-front.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000'
-  ].filter(Boolean);
-  
-  const origin = req.headers.origin;
-  if (!origin || allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Use secure CORS middleware
+  if (setSecureCorsHeaders(req, res)) {
+    return; // Preflight request handled
   }
 
   if (req.method !== 'POST') {
@@ -144,6 +132,7 @@ export default async function handler(req, res) {
     // Check rate limiting
     const rateLimit = checkRateLimit(clientIp);
     if (!rateLimit.allowed) {
+      logger.logSecurityEvent('Rate limit exceeded', { ip: clientIp });
       return res.status(429).json({ 
         success: false, 
         message: rateLimit.message 
@@ -160,8 +149,9 @@ export default async function handler(req, res) {
       });
     }
     
-    // Get configured admin password or use default
-    const configuredPassword = process.env.ADMIN_PASSWORD || 'Turdsonamission@25';
+    // Get configured admin password - REQUIRED
+    const configuredPassword = getRequiredEnvVar('ADMIN_PASSWORD');
+    
     const hashedConfigured = hashPassword(configuredPassword);
     const hashedInput = hashPassword(password);
     
@@ -171,6 +161,9 @@ export default async function handler(req, res) {
     if (!isValid) {
       updateLoginAttempts(clientIp, false);
       
+      // Log failed attempt
+      logger.logSecurityEvent('Admin login failed', { ip: clientIp });
+      
       // Log failed attempt if Firebase is available
       const firestore = initializeFirebase();
       if (firestore) {
@@ -179,7 +172,7 @@ export default async function handler(req, res) {
           ip: clientIp,
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
           userAgent: req.headers['user-agent']
-        }).catch(console.error);
+        }).catch(error => logger.logError(error, 'Firebase audit log'));
       }
       
       return res.status(401).json({ 
@@ -194,6 +187,9 @@ export default async function handler(req, res) {
     // Generate secure token
     const token = generateToken('admin', 'super_admin');
     
+    // Log successful login
+    logger.logSecurityEvent('Admin login successful', { ip: clientIp });
+    
     // Log successful login if Firebase is available
     const firestore = initializeFirebase();
     if (firestore) {
@@ -202,7 +198,7 @@ export default async function handler(req, res) {
         ip: clientIp,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         userAgent: req.headers['user-agent']
-      }).catch(console.error);
+      }).catch(error => logger.logError(error, 'Firebase audit log'));
     }
     
     return res.status(200).json({ 
@@ -212,7 +208,7 @@ export default async function handler(req, res) {
     });
     
   } catch (error) {
-    console.error('Authentication error:', error);
+    logger.logError(error, 'Admin authentication');
     return res.status(500).json({ 
       success: false,
       message: 'Authentication service error'

@@ -45,3 +45,4 @@ async function updateUserAdminStatus(userId, isAdmin) {
 // Update your user to admin
 const userId = 'did:privy:cmf90xuxx0011jv0c6z6zyn8x';
 updateUserAdminStatus(userId, true);
+

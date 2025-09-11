@@ -1,4 +1,6 @@
 import admin from 'firebase-admin';
+import { setSecureCorsHeaders } from '../../lib/cors.js';
+import { getRequiredEnvVar } from '../../lib/env-validation.js';
 
 // Initialize Firebase Admin
 let db = null;
@@ -7,18 +9,15 @@ function initializeFirebase() {
   if (db) return db;
   
   try {
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-    
-    if (!privateKey || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PROJECT_ID) {
-      console.error('Missing Firebase credentials');
-      return null;
-    }
+    const privateKey = getRequiredEnvVar('FIREBASE_PRIVATE_KEY').replace(/\\n/g, '\n');
+    const clientEmail = getRequiredEnvVar('FIREBASE_CLIENT_EMAIL');
+    const projectId = getRequiredEnvVar('FIREBASE_PROJECT_ID');
 
     if (!admin.apps.length) {
       admin.initializeApp({
         credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          projectId: projectId,
+          clientEmail: clientEmail,
           privateKey: privateKey,
         })
       });
@@ -38,26 +37,9 @@ export default async function handler(req, res) {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   
-  // CORS with specific origin
-  const allowedOrigins = [
-    process.env.FRONTEND_URL,
-    'https://turds-nation.vercel.app',
-    'https://turds-front.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000'
-  ].filter(Boolean);
-  
-  const origin = req.headers.origin;
-  if (!origin || allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Use secure CORS middleware
+  if (setSecureCorsHeaders(req, res)) {
+    return; // Preflight request handled
   }
 
   if (req.method !== 'GET') {

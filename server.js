@@ -6,36 +6,9 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Simple CORS - allow all Vercel deployments
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin
-    if (!origin) return callback(null, true);
-    
-    // Allow all localhost
-    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-      return callback(null, true);
-    }
-    
-    // Allow all Vercel deployments
-    if (origin.includes('.vercel.app')) {
-      return callback(null, true);
-    }
-    
-    // Allow production domains
-    if (origin.includes('turds.nation') || origin.includes('turds-nation')) {
-      return callback(null, true);
-    }
-    
-    // Log but allow for now to debug
-    console.log(`CORS request from: ${origin} - allowing`);
-    callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 200
-}));
+// Secure CORS configuration
+const { corsMiddleware } = require('./lib/cors');
+app.use(corsMiddleware);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));

@@ -1,4 +1,13 @@
 import admin from 'firebase-admin';
+import { setSecureCorsHeaders } from '../lib/cors.js';
+import { 
+  validateFirebaseUid, 
+  validateEmail, 
+  validateUsername, 
+  validateWalletAddress,
+  sanitizeInput 
+} from '../lib/validation.js';
+import logger from '../lib/logger.js';
 
 // Initialize Firebase Admin
 let db = null;
@@ -27,24 +36,23 @@ function initializeFirebase() {
     db = admin.firestore();
     return db;
   } catch (error) {
-    console.error('Firebase initialization error:', error);
+    logger.logError(error, 'Firebase initialization');
     return null;
   }
 }
 
 export default async function handler(req, res) {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  // Log request for audit trail
+  logger.logRequest(req, 'User API request');
   
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // Use secure CORS middleware
+  if (setSecureCorsHeaders(req, res)) {
+    return; // Preflight request handled
   }
 
   const firestore = initializeFirebase();
   if (!firestore) {
+    logger.logError(new Error('Firebase initialization failed'), 'User API');
     return res.status(500).json({ error: 'Database initialization failed' });
   }
 
@@ -55,31 +63,55 @@ export default async function handler(req, res) {
     if (action === 'register') {
       const userData = req.body;
       
-      console.log('=== REGISTRATION DEBUG ===');
-      console.log('Received userData:', JSON.stringify(userData, null, 2));
-      console.log('User ID being used:', userData.uid);
-      console.log('twitterUsername value:', userData.twitterUsername);
-      console.log('twitterUsername type:', typeof userData.twitterUsername);
-      console.log('twitterUsername truthy:', !!userData.twitterUsername);
+      logger.debug('User registration attempt', { uid: userData.uid });
       
+      // Validate required fields
       if (!userData.uid) {
         return res.status(400).json({ error: 'User ID required' });
+      }
+
+      // Validate user ID format
+      const uidValidation = validateFirebaseUid(userData.uid);
+      if (!uidValidation.valid) {
+        logger.logSecurityEvent('Invalid user ID format', { uid: userData.uid });
+        return res.status(400).json({ error: uidValidation.error });
       }
 
       // Check if user exists first
       const existingUser = await firestore.collection('users').doc(userData.uid).get();
       const existingData = existingUser.exists ? existingUser.data() : {};
 
+      // Validate and sanitize user data
+      const username = userData.username || userData.twitterUsername || existingData.username || 'Anonymous';
+      const email = userData.email || existingData.email || null;
+      const profilePicture = userData.profilePicture || existingData.profilePicture || null;
+      
+      // Validate email if provided
+      if (email) {
+        const emailValidation = validateEmail(email);
+        if (!emailValidation.valid) {
+          logger.logSecurityEvent('Invalid email format', { email, uid: userData.uid });
+          return res.status(400).json({ error: emailValidation.error });
+        }
+      }
+
+      // Validate username
+      const usernameValidation = validateUsername(username);
+      if (!usernameValidation.valid) {
+        logger.logSecurityEvent('Invalid username format', { username, uid: userData.uid });
+        return res.status(400).json({ error: usernameValidation.error });
+      }
+
       // Build complete user record
       const userRecord = {
         // Basic Info
         uid: userData.uid,
-        username: userData.username || userData.twitterUsername || existingData.username || 'Anonymous',
-        email: userData.email || existingData.email || null,
-        profilePicture: userData.profilePicture || existingData.profilePicture || null,
+        username: usernameValidation.value,
+        email: email ? emailValidation.value : null,
+        profilePicture: profilePicture ? sanitizeInput(profilePicture) : null,
         
         // Twitter Data
-        twitterUsername: userData.twitterUsername || existingData.twitterUsername || null,
+        twitterUsername: userData.twitterUsername ? sanitizeInput(userData.twitterUsername) : existingData.twitterUsername || null,
         twitterFollowers: existingData.twitterFollowers || 0,
         twitterFollowing: existingData.twitterFollowing || 0,
         twitterTweets: existingData.twitterTweets || 0,
@@ -119,10 +151,15 @@ export default async function handler(req, res) {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
           
+          // Validate required environment variables
+          if (!process.env.RAPIDAPI_KEY) {
+            throw new Error('RAPIDAPI_KEY environment variable is not configured');
+          }
+
           const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${twitterUsername}`, {
             method: 'GET',
             headers: {
-              'x-rapidapi-key': process.env.RAPIDAPI_KEY || '20fd5100f3msh8ad5102149a060ep18b8adjsn04eed04ad53d',
+              'x-rapidapi-key': process.env.RAPIDAPI_KEY,
               'x-rapidapi-host': 'twitter241.p.rapidapi.com'
             },
             signal: controller.signal
@@ -339,7 +376,7 @@ export default async function handler(req, res) {
           }
         });
       } catch (error) {
-        console.error('Error fetching user:', error);
+        logger.logError(error, 'User fetch');
         return res.status(500).json({ error: 'Failed to fetch user' });
       }
     }
@@ -350,6 +387,22 @@ export default async function handler(req, res) {
       
       if (!userId) {
         return res.status(400).json({ error: 'Missing userId' });
+      }
+
+      // Validate user ID
+      const uidValidation = validateFirebaseUid(userId);
+      if (!uidValidation.valid) {
+        logger.logSecurityEvent('Invalid user ID in wallet update', { userId });
+        return res.status(400).json({ error: uidValidation.error });
+      }
+
+      // Validate wallet address if provided
+      if (walletAddress) {
+        const walletValidation = validateWalletAddress(walletAddress);
+        if (!walletValidation.valid) {
+          logger.logSecurityEvent('Invalid wallet address', { walletAddress, userId });
+          return res.status(400).json({ error: walletValidation.error });
+        }
       }
       
       try {
@@ -362,12 +415,21 @@ export default async function handler(req, res) {
         // If wallet address provided, fetch token balance
         if (walletAddress) {
           try {
+            // Validate required environment variables
+            if (!process.env.TURDS_MINT_ADDRESS) {
+              console.error('TURDS_MINT_ADDRESS environment variable is not configured');
+              return res.status(500).json({ 
+                success: false, 
+                error: 'Token configuration error' 
+              });
+            }
+
             const tokenResponse = await fetch(`https://turds-backend.vercel.app/api/token-balance`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 walletAddress: walletAddress,
-                mintAddress: process.env.TURDS_MINT_ADDRESS || '5tiJnwdL5WrCFa7K4eKHRjRtqgX9z2hmbn3LACNApump'
+                mintAddress: process.env.TURDS_MINT_ADDRESS
               })
             });
             if (tokenResponse.ok) {
@@ -397,7 +459,7 @@ export default async function handler(req, res) {
           message: walletAddress ? 'Wallet connected' : 'Wallet removed'
         });
       } catch (error) {
-        console.error('Error updating wallet:', error);
+        logger.logError(error, 'Wallet update');
         return res.status(500).json({ error: 'Failed to update wallet' });
       }
     }
@@ -423,7 +485,7 @@ export default async function handler(req, res) {
           message: 'Stealth mode updated successfully'
         });
       } catch (error) {
-        console.error('Error updating stealth mode:', error);
+        logger.logError(error, 'Stealth mode update');
         return res.status(500).json({ error: 'Failed to update stealth mode' });
       }
     }
@@ -461,11 +523,16 @@ export default async function handler(req, res) {
       }
 
       try {
+        // Validate required environment variables
+        if (!process.env.RAPIDAPI_KEY) {
+          throw new Error('RAPIDAPI_KEY environment variable is not configured');
+        }
+
         // Call Twitter API to get user data
         const twitterResponse = await fetch(`https://twitter241.p.rapidapi.com/user?username=${username}`, {
           method: 'GET',
           headers: {
-            'x-rapidapi-key': process.env.RAPIDAPI_KEY || '20fd5100f3msh8ad5102149a060ep18b8adjsn04eed04ad53d',
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
             'x-rapidapi-host': 'twitter241.p.rapidapi.com'
           }
         });
@@ -680,7 +747,7 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    console.error('User API error:', error);
+    logger.logError(error, 'User API');
     return res.status(500).json({ 
       error: 'Internal server error',
       details: error.message
