@@ -33,7 +33,7 @@ function initializeFirebase() {
 }
 
 export default async function handler(req, res) {
-  // Set CORS headers first
+  // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -47,22 +47,20 @@ export default async function handler(req, res) {
   if (!firestore) {
     return res.status(500).json({ 
       error: 'Database connection failed',
-      success: false,
-      polls: []
+      success: false
     });
   }
 
   const { action } = req.query;
 
   try {
-    // GET POLLS
-    if (action === 'get-polls') {
+    // GET ALL ACTIVE POLLS (for Vote page)
+    if (action === 'get-active-polls') {
       try {
         const pollsSnapshot = await firestore
           .collection('government_polls')
           .where('isActive', '==', true)
           .orderBy('createdAt', 'desc')
-          .limit(10)
           .get();
         
         const polls = [];
@@ -76,8 +74,8 @@ export default async function handler(req, res) {
               createdBy: data.createdBy,
               createdByRole: data.createdByRole || 'government',
               createdAt: data.createdAt?.toDate() || new Date(),
-              isActive: data.isActive,
-              totalVotes: data.totalVotes || 0
+              totalVotes: data.totalVotes || 0,
+              voters: data.voters || []
             });
           });
         }
@@ -87,7 +85,6 @@ export default async function handler(req, res) {
           polls
         });
       } catch (error) {
-        // Return empty polls if collection doesn't exist
         return res.status(200).json({
           success: true,
           polls: []
@@ -95,42 +92,9 @@ export default async function handler(req, res) {
       }
     }
 
-    // CREATE POLL
-    if (action === 'create-poll') {
-      const { question, options, createdBy, createdByRole } = req.body;
-
-      if (!question || !options || options.length < 2) {
-        return res.status(400).json({ 
-          error: 'Question and at least 2 options are required',
-          success: false 
-        });
-      }
-
-      const pollData = {
-        question,
-        options: options.map(opt => ({
-          text: opt,
-          votes: 0
-        })),
-        createdBy: createdBy || 'Government',
-        createdByRole: createdByRole || 'government',
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        isActive: true,
-        totalVotes: 0,
-        voters: []
-      };
-
-      const docRef = await firestore.collection('government_polls').add(pollData);
-
-      return res.status(200).json({
-        success: true,
-        pollId: docRef.id
-      });
-    }
-
-    // VOTE ON POLL
-    if (action === 'vote') {
-      const { pollId, optionIndex, userId } = req.body;
+    // CAST VOTE
+    if (action === 'cast-vote') {
+      const { pollId, optionIndex, userId, userWallet } = req.body;
 
       if (!pollId || optionIndex === undefined || !userId) {
         return res.status(400).json({ 
@@ -154,19 +118,36 @@ export default async function handler(req, res) {
       // Check if user already voted
       if (pollData.voters && pollData.voters.includes(userId)) {
         return res.status(400).json({ 
-          error: 'User has already voted on this poll',
+          error: 'You have already voted on this poll',
           success: false 
         });
       }
 
       // Update vote count
-      const options = pollData.options;
-      options[optionIndex].votes += 1;
+      const options = [...pollData.options];
+      if (optionIndex >= 0 && optionIndex < options.length) {
+        options[optionIndex].votes = (options[optionIndex].votes || 0) + 1;
+      } else {
+        return res.status(400).json({ 
+          error: 'Invalid option selected',
+          success: false 
+        });
+      }
 
+      // Update poll with new vote
       await pollRef.update({
         options,
         totalVotes: admin.firestore.FieldValue.increment(1),
         voters: admin.firestore.FieldValue.arrayUnion(userId)
+      });
+
+      // Log the vote
+      await firestore.collection('vote_logs').add({
+        pollId,
+        userId,
+        userWallet,
+        optionIndex,
+        votedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
       return res.status(200).json({
@@ -175,57 +156,42 @@ export default async function handler(req, res) {
       });
     }
 
-    // CLOSE POLL
-    if (action === 'close-poll') {
-      const { pollId } = req.body;
+    // GET USER VOTE STATUS
+    if (action === 'check-vote-status') {
+      const { userId } = req.query;
 
-      if (!pollId) {
+      if (!userId) {
         return res.status(400).json({ 
-          error: 'Poll ID is required',
+          error: 'User ID is required',
           success: false 
         });
       }
 
-      await firestore.collection('government_polls').doc(pollId).update({
-        isActive: false,
-        closedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: 'Poll closed successfully'
-      });
-    }
-
-    // GET GOVERNMENT MEMBERS
-    if (action === 'get-members') {
       try {
-        const membersSnapshot = await firestore
-          .collection('users')
-          .where('role', '==', 'government')
+        // Get all active polls
+        const pollsSnapshot = await firestore
+          .collection('government_polls')
+          .where('isActive', '==', true)
           .get();
         
-        const members = [];
-        if (!membersSnapshot.empty) {
-          membersSnapshot.forEach(doc => {
+        const voteStatus = {};
+        if (!pollsSnapshot.empty) {
+          pollsSnapshot.forEach(doc => {
             const data = doc.data();
-            members.push({
-              id: doc.id,
-              username: data.username,
-              governmentRole: data.governmentRole,
-              appointedAt: data.appointedAt?.toDate() || null
-            });
+            voteStatus[doc.id] = {
+              hasVoted: data.voters ? data.voters.includes(userId) : false
+            };
           });
         }
 
         return res.status(200).json({
           success: true,
-          members
+          voteStatus
         });
       } catch (error) {
         return res.status(200).json({
           success: true,
-          members: []
+          voteStatus: {}
         });
       }
     }
@@ -236,12 +202,11 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('Government API error:', error);
-    return res.status(200).json({ 
+    console.error('Vote Hub API error:', error);
+    return res.status(500).json({ 
+      error: 'Internal server error',
       success: false,
-      error: error.message,
-      polls: [],
-      members: []
+      details: error.message 
     });
   }
 }

@@ -78,31 +78,39 @@ export default async function handler(req, res) {
 
     // GET ACTIVE BROADCAST MESSAGE
     if (action === 'get-active') {
-      const activeMessageSnapshot = await firestore.collection('broadcast_messages')
-        .where('isActive', '==', true)
-        .orderBy('createdAt', 'desc')
-        .limit(1)
-        .get();
+      try {
+        const activeMessageSnapshot = await firestore.collection('broadcast_messages')
+          .where('isActive', '==', true)
+          .orderBy('createdAt', 'desc')
+          .limit(1)
+          .get();
 
-      if (activeMessageSnapshot.empty) {
+        if (activeMessageSnapshot.empty) {
+          return res.status(200).json({
+            success: false,
+            message: null
+          });
+        }
+
+        const doc = activeMessageSnapshot.docs[0];
+        const data = doc.data();
+        
         return res.status(200).json({
           success: true,
+          message: {
+            id: doc.id,
+            message: data.message,
+            type: data.type || 'info',
+            createdAt: data.createdAt?.toDate() || null
+          }
+        });
+      } catch (error) {
+        console.log('No active broadcast found');
+        return res.status(200).json({
+          success: false,
           message: null
         });
       }
-
-      const doc = activeMessageSnapshot.docs[0];
-      const data = doc.data();
-      
-      return res.status(200).json({
-        success: true,
-        message: {
-          id: doc.id,
-          message: data.message,
-          type: data.type || 'info',
-          createdAt: data.createdAt?.toDate() || null
-        }
-      });
     }
 
     // CREATE BROADCAST MESSAGE

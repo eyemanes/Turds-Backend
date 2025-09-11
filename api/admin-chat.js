@@ -2,6 +2,7 @@ import admin from 'firebase-admin';
 
 // Initialize Firebase Admin
 let db = null;
+let initialized = false;
 
 function initializeFirebase() {
   if (db) return db;
@@ -25,6 +26,7 @@ function initializeFirebase() {
     }
     
     db = admin.firestore();
+    initialized = true;
     return db;
   } catch (error) {
     console.error('Firebase initialization error:', error);
@@ -33,12 +35,7 @@ function initializeFirebase() {
 }
 
 export default async function handler(req, res) {
-  const firestore = initializeFirebase();
-  if (!firestore) {
-    return res.status(500).json({ error: 'Database connection failed' });
-  }
-
-  // Set CORS headers
+  // Set CORS headers first
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -48,47 +45,72 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const { action, room = 'admin' } = req.query;
+  const firestore = initializeFirebase();
+  if (!firestore) {
+    return res.status(500).json({ 
+      error: 'Database connection failed',
+      success: false,
+      messages: [] 
+    });
+  }
+
+  const { action } = req.query;
+  // Use a shared room for admin and government
+  const room = 'admin-government-shared';
 
   try {
     // GET CHAT MESSAGES
     if (action === 'get-messages') {
-      const messagesSnapshot = await firestore
-        .collection('chat_messages')
-        .where('room', '==', room)
-        .orderBy('timestamp', 'desc')
-        .limit(50)
-        .get();
-      
-      const messages = [];
-      messagesSnapshot.forEach(doc => {
-        const data = doc.data();
-        messages.push({
-          id: doc.id,
-          message: data.message,
-          senderId: data.senderId,
-          senderName: data.senderName,
-          room: data.room,
-          timestamp: data.timestamp?.toDate() || new Date(),
+      try {
+        // Create the collection if it doesn't exist by adding a system message
+        const messagesRef = firestore.collection('chat_messages');
+        const snapshot = await messagesRef
+          .where('room', '==', room)
+          .orderBy('timestamp', 'desc')
+          .limit(50)
+          .get();
+        
+        const messages = [];
+        if (!snapshot.empty) {
+          snapshot.forEach(doc => {
+            const data = doc.data();
+            messages.push({
+              id: doc.id,
+              message: data.message,
+              senderId: data.senderId,
+              senderName: data.senderName,
+              senderRole: data.senderRole || 'admin',
+              room: data.room,
+              timestamp: data.timestamp?.toDate() || new Date(),
+            });
+          });
+        }
+
+        // Reverse to show oldest first
+        messages.reverse();
+
+        return res.status(200).json({
+          success: true,
+          messages
         });
-      });
-
-      // Reverse to show oldest first
-      messages.reverse();
-
-      return res.status(200).json({
-        success: true,
-        messages
-      });
+      } catch (error) {
+        console.log('Error fetching messages:', error);
+        // Return empty messages on error
+        return res.status(200).json({
+          success: true,
+          messages: []
+        });
+      }
     }
 
     // SEND MESSAGE
     if (action === 'send-message') {
-      const { message, senderId, senderName } = req.body;
+      const { message, senderId, senderName, senderRole } = req.body;
 
       if (!message || !senderId || !senderName) {
         return res.status(400).json({ 
-          error: 'Missing required fields: message, senderId, senderName' 
+          error: 'Missing required fields: message, senderId, senderName',
+          success: false 
         });
       }
 
@@ -96,6 +118,7 @@ export default async function handler(req, res) {
         message,
         senderId,
         senderName,
+        senderRole: senderRole || 'admin',
         room,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
       };
@@ -106,6 +129,7 @@ export default async function handler(req, res) {
       await firestore.collection('online_admins').doc(senderId).set({
         id: senderId,
         name: senderName,
+        role: senderRole || 'admin',
         lastSeen: admin.firestore.FieldValue.serverTimestamp(),
         room
       }, { merge: true });
@@ -120,56 +144,48 @@ export default async function handler(req, res) {
     if (action === 'get-online-admins') {
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
       
-      const onlineSnapshot = await firestore
-        .collection('online_admins')
-        .where('lastSeen', '>', fiveMinutesAgo)
-        .get();
-      
-      const onlineAdmins = [];
-      onlineSnapshot.forEach(doc => {
-        const data = doc.data();
-        onlineAdmins.push({
-          id: doc.id,
-          name: data.name,
-          room: data.room
+      try {
+        const onlineSnapshot = await firestore
+          .collection('online_admins')
+          .where('lastSeen', '>', fiveMinutesAgo)
+          .get();
+        
+        const onlineAdmins = [];
+        if (!onlineSnapshot.empty) {
+          onlineSnapshot.forEach(doc => {
+            const data = doc.data();
+            onlineAdmins.push({
+              id: doc.id,
+              name: data.name,
+              role: data.role || 'admin',
+              room: data.room
+            });
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          onlineAdmins
         });
-      });
-
-      return res.status(200).json({
-        success: true,
-        onlineAdmins
-      });
+      } catch (error) {
+        return res.status(200).json({
+          success: true,
+          onlineAdmins: []
+        });
+      }
     }
 
-    // CLEAR OLD MESSAGES (optional cleanup)
-    if (action === 'cleanup') {
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      
-      const oldMessagesSnapshot = await firestore
-        .collection('chat_messages')
-        .where('timestamp', '<', thirtyDaysAgo)
-        .get();
-
-      const batch = firestore.batch();
-      oldMessagesSnapshot.forEach(doc => {
-        batch.delete(doc.ref);
-      });
-
-      await batch.commit();
-
-      return res.status(200).json({
-        success: true,
-        deletedCount: oldMessagesSnapshot.size
-      });
-    }
-
-    return res.status(400).json({ error: 'Invalid action' });
+    return res.status(400).json({ 
+      error: 'Invalid action',
+      success: false 
+    });
 
   } catch (error) {
     console.error('Admin Chat API error:', error);
-    return res.status(500).json({ 
-      error: 'Internal server error',
-      details: error.message 
+    return res.status(200).json({ 
+      success: false,
+      error: error.message,
+      messages: []
     });
   }
 }
