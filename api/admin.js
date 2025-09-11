@@ -1,68 +1,41 @@
-import admin from 'firebase-admin';
-import { setSecureCorsHeaders } from '../lib/cors.js';
+import { admin, getFirestore } from '../lib/firebase-init.js';
+import { setSecureCorsHeaders, rateLimit, sanitizeInput } from '../lib/cors.js';
+import logger from '../lib/logger.js';
+import { requireAdmin, validateRequest } from '../lib/middleware.js';
+import crypto from 'crypto';
 
 /**
- * SECURITY NOTE: Admin status can ONLY be set directly in the Firebase database.
+ * SECURITY NOTE: Admin status can ONLY be set through Firebase Custom Claims.
  * 
  * To grant admin access:
- * 1. Go to Firebase Console
- * 2. Navigate to Firestore Database
- * 3. Find the 'users' collection
- * 4. Find the user document by their ID
- * 5. Add/Update field: isAdmin = true
+ * 1. Use the make-super-admin.js script
+ * 2. Or set custom claims via Firebase Admin SDK
  * 
  * Never expose an API endpoint for setting admin status as it could be exploited.
  */
 
-// Initialize Firebase Admin only once
-let db = null;
-
-function initializeFirebase() {
-  if (db) return db;
-  
-  try {
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-    
-    if (!privateKey || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PROJECT_ID) {
-      console.error('Missing Firebase credentials');
-      return null;
-    }
-
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: privateKey,
-        })
-      });
-    }
-    
-    db = admin.firestore();
-    return db;
-  } catch (error) {
-    console.error('Firebase initialization error:', error);
-    return null;
-  }
-}
-
 export default async function handler(req, res) {
-  // Security headers
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  
-  // Use secure CORS middleware
+  // Apply security middleware
   if (setSecureCorsHeaders(req, res)) {
     return; // Preflight request handled
   }
+  
+  // Apply rate limiting
+  rateLimit(req, res);
+  
+  // Sanitize inputs
+  sanitizeInput(req, res);
+  
+  // Log request
+  logger.logRequest(req, 'Admin API');
 
-  const firestore = initializeFirebase();
+  const firestore = getFirestore();
   
   if (!firestore) {
-    return res.status(200).json({
+    logger.error('Database not configured');
+    return res.status(500).json({
       success: false,
-      message: 'Database not configured'
+      message: 'Database initialization failed'
     });
   }
 

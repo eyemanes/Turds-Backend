@@ -17,7 +17,12 @@
     "lint": "eslint .",
     "security:check": "npm audit --audit-level=moderate",
     "security:fix": "npm audit fix",
-    "clean": "rm -rf node_modules package-lock.json && npm install"
+    "security:monitor": "node scripts/security-monitor.js",
+    "security:audit": "npm run security:check && npm run lint",
+    "clean": "rm -rf node_modules package-lock.json && npm install",
+    "validate:env": "node -e 'require(\"./lib/config.js\").validate()'",
+    "logs:tail": "tail -f logs/*.log",
+    "db:backup": "node scripts/backup-firestore.js"
   },
   "dependencies": {
     "@solana/web3.js": "^1.87.6",

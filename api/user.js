@@ -1,56 +1,31 @@
-import admin from 'firebase-admin';
-import { setSecureCorsHeaders } from '../lib/cors.js';
+import { admin, getFirestore } from '../lib/firebase-init.js';
+import { setSecureCorsHeaders, rateLimit, sanitizeInput } from '../lib/cors.js';
 import { 
   validateFirebaseUid, 
   validateEmail, 
   validateUsername, 
   validateWalletAddress,
-  sanitizeInput 
+  sanitizeInput as sanitizeString
 } from '../lib/validation.js';
 import logger from '../lib/logger.js';
-
-// Initialize Firebase Admin
-let db = null;
-
-function initializeFirebase() {
-  if (db) return db;
-  
-  try {
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-    
-    if (!privateKey || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PROJECT_ID) {
-      console.error('Missing Firebase credentials');
-      return null;
-    }
-
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: privateKey,
-        })
-      });
-    }
-    
-    db = admin.firestore();
-    return db;
-  } catch (error) {
-    logger.logError(error, 'Firebase initialization');
-    return null;
-  }
-}
+import { validateRequest } from '../lib/middleware.js';
 
 export default async function handler(req, res) {
   // Log request for audit trail
   logger.logRequest(req, 'User API request');
   
-  // Use secure CORS middleware
+  // Apply security middleware
   if (setSecureCorsHeaders(req, res)) {
     return; // Preflight request handled
   }
+  
+  // Apply rate limiting
+  rateLimit(req, res);
+  
+  // Sanitize inputs
+  sanitizeInput(req, res);
 
-  const firestore = initializeFirebase();
+  const firestore = getFirestore();
   if (!firestore) {
     logger.logError(new Error('Firebase initialization failed'), 'User API');
     return res.status(500).json({ error: 'Database initialization failed' });

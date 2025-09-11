@@ -1,31 +1,49 @@
-import admin from 'firebase-admin';
-import { setSecureCorsHeaders } from '../lib/cors.js';
+import { admin, getFirestore } from '../lib/firebase-init.js';
+import { setSecureCorsHeaders, rateLimit, sanitizeInput } from '../lib/cors.js';
+import logger from '../lib/logger.js';
+import { requireAuth, validateRequest } from '../lib/middleware.js';
+import { validateFirebaseUid } from '../lib/validation.js';
 
-// Initialize Firebase Admin
-if (!admin.apps.length) {
-  try {
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-    
-    if (privateKey && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PROJECT_ID) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: privateKey,
-        })
-      });
-    }
-  } catch (error) {
-    console.error('Firebase Admin initialization error:', error);
+// Validation schemas
+const voteSchema = {
+  voterId: {
+    required: true,
+    type: 'string',
+    validate: (value) => validateFirebaseUid(value).valid || 'Invalid voter ID'
+  },
+  candidateId: {
+    required: true,
+    type: 'string',
+    validate: (value) => validateFirebaseUid(value).valid || 'Invalid candidate ID'
+  },
+  electionType: {
+    required: false,
+    type: 'string',
+    validate: (value) => ['general', 'primary', 'special'].includes(value) || 'Invalid election type'
   }
-}
-
-const db = admin.firestore();
+};
 
 export default async function handler(req, res) {
-  // Use secure CORS middleware
+  // Apply security middleware
   if (setSecureCorsHeaders(req, res)) {
     return; // Preflight request handled
+  }
+  
+  // Apply rate limiting - stricter for voting
+  const ip = req.headers['x-forwarded-for'] || req.connection?.remoteAddress;
+  const voteRateLimit = { maxRequests: 10, windowMs: 60000 }; // 10 votes per minute max
+  rateLimit(req, res);
+  
+  // Sanitize inputs
+  sanitizeInput(req, res);
+  
+  // Log request
+  logger.logRequest(req, 'Vote API');
+  
+  const db = getFirestore();
+  if (!db) {
+    logger.error('Database not configured');
+    return res.status(500).json({ error: 'Database initialization failed' });
   }
 
   try {
