@@ -98,7 +98,11 @@ export default async function handler(req, res) {
 
       // Validate government role if provided
       if (governmentRole) {
-        const validGovRoles = ['president', 'vice_president', 'minister', 'ambassador', 'judge', 'senator'];
+        const validGovRoles = [
+          'president', 'prime-minister', 'secretary', 'minister-marketing-finance', 
+          'minister-creativity', 'minister-raid-corps', 'minister-development', 
+          'minister-citizens', 'minister-justice'
+        ];
         if (!validGovRoles.includes(governmentRole)) {
           return res.status(400).json({ error: 'Invalid government role' });
         }
@@ -126,22 +130,85 @@ export default async function handler(req, res) {
 
     // GET GOVERNMENT ROLES
     if (action === 'get-government-roles') {
-      const rolesSnapshot = await firestore.collection('government_roles').get();
-      const roles = [];
+      // Define the government roles directly in the code
+      const governmentRoles = [
+        {
+          id: 'president',
+          name: 'President',
+          description: 'Head of state and government, highest authority in TURDS Nation',
+          level: 10,
+          permissions: ['all'],
+          color: '#DC2626'
+        },
+        {
+          id: 'prime-minister',
+          name: 'Prime Minister',
+          description: 'Second in command, assists the President in governance',
+          level: 9,
+          permissions: ['manage_ministers', 'approve_policies', 'emergency_powers'],
+          color: '#7C3AED'
+        },
+        {
+          id: 'secretary',
+          name: 'Secretary',
+          description: 'Handles official communications and documentation',
+          level: 8,
+          permissions: ['manage_documents', 'official_communications', 'record_keeping'],
+          color: '#059669'
+        },
+        {
+          id: 'minister-marketing-finance',
+          name: 'Minister of Marketing and Finance',
+          description: 'Manages financial resources and marketing strategies',
+          level: 7,
+          permissions: ['budget_management', 'marketing_campaigns', 'financial_oversight'],
+          color: '#D97706'
+        },
+        {
+          id: 'minister-creativity',
+          name: 'Minister of Creativity',
+          description: 'Oversees creative projects and cultural initiatives',
+          level: 6,
+          permissions: ['creative_projects', 'cultural_events', 'content_approval'],
+          color: '#DB2777'
+        },
+        {
+          id: 'minister-raid-corps',
+          name: 'Minister of Raid Corps',
+          description: 'Commands military operations and defense strategies',
+          level: 7,
+          permissions: ['military_operations', 'defense_planning', 'security_oversight'],
+          color: '#DC2626'
+        },
+        {
+          id: 'minister-development',
+          name: 'Minister of Development',
+          description: 'Manages infrastructure and technological advancement',
+          level: 6,
+          permissions: ['infrastructure_projects', 'tech_development', 'urban_planning'],
+          color: '#2563EB'
+        },
+        {
+          id: 'minister-citizens',
+          name: 'Minister of Citizens',
+          description: 'Represents citizen interests and handles public services',
+          level: 5,
+          permissions: ['citizen_services', 'public_welfare', 'community_outreach'],
+          color: '#16A34A'
+        },
+        {
+          id: 'minister-justice',
+          name: 'Minister of Justice',
+          description: 'Oversees legal matters and judicial processes',
+          level: 8,
+          permissions: ['legal_oversight', 'judicial_appointments', 'law_enforcement'],
+          color: '#7C2D12'
+        }
+      ];
       
-      rolesSnapshot.forEach(doc => {
-        const data = doc.data();
-        roles.push({
-          id: doc.id,
-          ...data,
-          createdAt: data.createdAt?.toDate() || null,
-          updatedAt: data.updatedAt?.toDate() || null
-        });
-      });
-
       return res.status(200).json({
         success: true,
-        roles: roles.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        roles: governmentRoles.sort((a, b) => b.level - a.level) // Sort by level descending
       });
     }
 

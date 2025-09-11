@@ -52,9 +52,10 @@ export default async function handler(req, res) {
   try {
     // GET CHAT MESSAGES
     if (action === 'get-messages') {
-      const { limit = 50, offset = 0 } = req.query;
+      const { limit = 50, offset = 0, room = 'admin' } = req.query;
       
       const messagesSnapshot = await firestore.collection('admin_chat')
+        .where('room', '==', room)
         .orderBy('createdAt', 'desc')
         .limit(parseInt(limit))
         .offset(parseInt(offset))
@@ -70,7 +71,8 @@ export default async function handler(req, res) {
           senderName: data.senderName,
           senderRole: data.senderRole,
           createdAt: data.createdAt?.toDate() || null,
-          isSystem: data.isSystem || false
+          isSystem: data.isSystem || false,
+          room: data.room || 'admin'
         });
       });
 
@@ -82,7 +84,7 @@ export default async function handler(req, res) {
 
     // SEND CHAT MESSAGE
     if (action === 'send-message') {
-      const { message, senderId, senderName, senderRole } = req.body;
+      const { message, senderId, senderName, senderRole, room = 'admin' } = req.body;
 
       if (!message || !senderId || !senderName) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -93,6 +95,7 @@ export default async function handler(req, res) {
         senderId,
         senderName,
         senderRole: senderRole || 'admin',
+        room: room,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         isSystem: false
       };
