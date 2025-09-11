@@ -37,9 +37,10 @@ export default async function handler(req, res) {
   if (!firestore) {
     return res.status(500).json({ error: 'Database connection failed' });
   }
+
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
@@ -47,18 +48,16 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const { action } = req.query;
+  const { action, room = 'admin' } = req.query;
 
   try {
     // GET CHAT MESSAGES
     if (action === 'get-messages') {
-      const { limit = 50, offset = 0, room = 'admin' } = req.query;
-      
-      const messagesSnapshot = await firestore.collection('admin_chat')
+      const messagesSnapshot = await firestore
+        .collection('chat_messages')
         .where('room', '==', room)
-        .orderBy('createdAt', 'desc')
-        .limit(parseInt(limit))
-        .offset(parseInt(offset))
+        .orderBy('timestamp', 'desc')
+        .limit(50)
         .get();
       
       const messages = [];
@@ -69,85 +68,51 @@ export default async function handler(req, res) {
           message: data.message,
           senderId: data.senderId,
           senderName: data.senderName,
-          senderRole: data.senderRole,
-          createdAt: data.createdAt?.toDate() || null,
-          isSystem: data.isSystem || false,
-          room: data.room || 'admin'
+          room: data.room,
+          timestamp: data.timestamp?.toDate() || new Date(),
         });
       });
 
+      // Reverse to show oldest first
+      messages.reverse();
+
       return res.status(200).json({
         success: true,
-        messages: messages.reverse() // Reverse to show oldest first
+        messages
       });
     }
 
-    // SEND CHAT MESSAGE
+    // SEND MESSAGE
     if (action === 'send-message') {
-      const { message, senderId, senderName, senderRole, room = 'admin' } = req.body;
+      const { message, senderId, senderName } = req.body;
 
       if (!message || !senderId || !senderName) {
-        return res.status(400).json({ error: 'Missing required fields' });
+        return res.status(400).json({ 
+          error: 'Missing required fields: message, senderId, senderName' 
+        });
       }
 
-      const messageData = {
+      const newMessage = {
         message,
         senderId,
         senderName,
-        senderRole: senderRole || 'admin',
-        room: room,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        isSystem: false
+        room,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
       };
 
-      const docRef = await firestore.collection('admin_chat').add(messageData);
+      const docRef = await firestore.collection('chat_messages').add(newMessage);
+
+      // Also update online status
+      await firestore.collection('online_admins').doc(senderId).set({
+        id: senderId,
+        name: senderName,
+        lastSeen: admin.firestore.FieldValue.serverTimestamp(),
+        room
+      }, { merge: true });
 
       return res.status(200).json({
         success: true,
-        message: 'Message sent successfully',
         messageId: docRef.id
-      });
-    }
-
-    // SEND SYSTEM MESSAGE
-    if (action === 'send-system-message') {
-      const { message } = req.body;
-
-      if (!message) {
-        return res.status(400).json({ error: 'Message is required' });
-      }
-
-      const messageData = {
-        message,
-        senderId: 'system',
-        senderName: 'System',
-        senderRole: 'system',
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        isSystem: true
-      };
-
-      const docRef = await firestore.collection('admin_chat').add(messageData);
-
-      return res.status(200).json({
-        success: true,
-        message: 'System message sent successfully',
-        messageId: docRef.id
-      });
-    }
-
-    // DELETE MESSAGE
-    if (action === 'delete-message') {
-      const { messageId } = req.body;
-
-      if (!messageId) {
-        return res.status(400).json({ error: 'Message ID is required' });
-      }
-
-      await firestore.collection('admin_chat').doc(messageId).delete();
-
-      return res.status(200).json({
-        success: true,
-        message: 'Message deleted successfully'
       });
     }
 
@@ -155,26 +120,18 @@ export default async function handler(req, res) {
     if (action === 'get-online-admins') {
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
       
-      const onlineAdminsSnapshot = await firestore.collection('users')
-        .where('isAdmin', '==', true)
-        .where('lastActive', '>', fiveMinutesAgo)
+      const onlineSnapshot = await firestore
+        .collection('online_admins')
+        .where('lastSeen', '>', fiveMinutesAgo)
         .get();
       
       const onlineAdmins = [];
-      onlineAdminsSnapshot.forEach(doc => {
+      onlineSnapshot.forEach(doc => {
         const data = doc.data();
-        
-        // Check if admin is in stealth mode (has stealthMode field set to true)
-        // If stealthMode is true, exclude from online list
-        if (data.stealthMode === true) {
-          return; // Skip this admin - they're in stealth mode
-        }
-        
         onlineAdmins.push({
           id: doc.id,
-          username: data.username || 'Unknown',
-          profilePicture: data.profilePicture || null,
-          lastActive: data.lastActive?.toDate() || null
+          name: data.name,
+          room: data.room
         });
       });
 
@@ -184,10 +141,35 @@ export default async function handler(req, res) {
       });
     }
 
+    // CLEAR OLD MESSAGES (optional cleanup)
+    if (action === 'cleanup') {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      
+      const oldMessagesSnapshot = await firestore
+        .collection('chat_messages')
+        .where('timestamp', '<', thirtyDaysAgo)
+        .get();
+
+      const batch = firestore.batch();
+      oldMessagesSnapshot.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+
+      await batch.commit();
+
+      return res.status(200).json({
+        success: true,
+        deletedCount: oldMessagesSnapshot.size
+      });
+    }
+
     return res.status(400).json({ error: 'Invalid action' });
 
   } catch (error) {
-    console.error('Admin chat API error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error('Admin Chat API error:', error);
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
   }
 }

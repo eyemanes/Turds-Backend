@@ -86,38 +86,36 @@ export default async function handler(req, res) {
     if (action === 'update-role') {
       const { userId, role, governmentRole } = req.body;
 
-      if (!userId || !role) {
-        return res.status(400).json({ error: 'Missing userId or role' });
+      if (!userId) {
+        return res.status(400).json({ error: 'Missing userId' });
       }
 
-      // Validate role
-      const validRoles = ['citizen', 'moderator', 'admin', 'super_admin'];
-      if (!validRoles.includes(role)) {
-        return res.status(400).json({ error: 'Invalid role' });
+      // Update user role
+      const updateData = {
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      };
+
+      // If role is provided, update it (only government role allowed)
+      if (role === 'government' || role === 'citizen') {
+        updateData.role = role;
       }
 
       // Validate government role if provided
       if (governmentRole) {
         const validGovRoles = [
-          'president', 'prime-minister', 'secretary', 'minister-marketing-finance', 
-          'minister-creativity', 'minister-raid-corps', 'minister-development', 
-          'minister-citizens', 'minister-justice'
+          'president', 'primeMinister', 'secretary', 'financeMinister', 
+          'creativityMinister', 'raidMinister', 'developmentMinister', 
+          'citizensMinister', 'justiceMinister', 'citizen'
         ];
-        if (!validGovRoles.includes(governmentRole)) {
-          return res.status(400).json({ error: 'Invalid government role' });
+        if (validGovRoles.includes(governmentRole)) {
+          updateData.governmentRole = governmentRole;
+          if (governmentRole !== 'citizen') {
+            updateData.role = 'government';
+          } else {
+            updateData.role = 'citizen';
+            updateData.governmentRole = null;
+          }
         }
-      }
-
-      // Update user role
-      const updateData = {
-        role: role,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      };
-
-      if (governmentRole) {
-        updateData.governmentRole = governmentRole;
-      } else {
-        updateData.governmentRole = null;
       }
 
       await firestore.collection('users').doc(userId).update(updateData);
@@ -125,6 +123,30 @@ export default async function handler(req, res) {
       return res.status(200).json({
         success: true,
         message: 'Member role updated successfully'
+      });
+    }
+
+    // GET GOVERNMENT MEMBERS
+    if (action === 'get-government') {
+      const membersSnapshot = await firestore.collection('users')
+        .where('role', '==', 'government')
+        .get();
+      
+      const members = [];
+      membersSnapshot.forEach(doc => {
+        const data = doc.data();
+        members.push({
+          id: doc.id,
+          username: data.username || 'Unknown',
+          governmentRole: data.governmentRole || null,
+          profilePicture: data.profilePicture || null,
+          joinedAt: data.joinedAt?.toDate() || null
+        });
+      });
+
+      return res.status(200).json({
+        success: true,
+        members
       });
     }
 
